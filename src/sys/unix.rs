@@ -1,0 +1,195 @@
+use super::Echo;
+use socket2::{Domain, Protocol, SockAddr, Socket, Type};
+use std::mem::MaybeUninit;
+use std::net::{Ipv4Addr, SocketAddrV4};
+use std::process::Command;
+use std::time::{Duration, Instant};
+
+fn checksum(b: &[u8]) -> u16 {
+    let mut s = 0u32;
+    for c in b.chunks(2) {
+        s += u16::from_be_bytes([c[0], *c.get(1).unwrap_or(&0)]) as u32;
+    }
+    while s >> 16 != 0 {
+        s = (s & 0xffff) + (s >> 16);
+    }
+    !(s as u16)
+}
+
+/// Raw ICMP (нужен root/CAP_NET_RAW); для обычного пинга fallback на DGRAM.
+pub fn icmp_echo(ip: Ipv4Addr, ttl: u8, timeout: Duration) -> Result<Echo, String> {
+    let mut raw = true;
+    let sock = match Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::ICMPV4)) {
+        Ok(s) => s,
+        Err(_) => {
+            raw = false;
+            Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::ICMPV4)).map_err(|e| e.to_string())?
+        }
+    };
+    sock.set_ttl_v4(ttl as u32).map_err(|e| e.to_string())?;
+    let id = (std::process::id() & 0xffff) as u16;
+    let seq = ttl as u16;
+    let mut pkt = vec![8u8, 0, 0, 0, (id >> 8) as u8, id as u8, (seq >> 8) as u8, seq as u8];
+    pkt.extend_from_slice(b"ispcheck");
+    let c = checksum(&pkt);
+    pkt[2] = (c >> 8) as u8;
+    pkt[3] = c as u8;
+    let start = Instant::now();
+    sock.send_to(&pkt, &SockAddr::from(SocketAddrV4::new(ip, 0))).map_err(|e| e.to_string())?;
+    let mut buf = [MaybeUninit::<u8>::uninit(); 1500];
+    loop {
+        let Some(left) = timeout.checked_sub(start.elapsed()) else {
+            return Ok(Echo { hop: None, rtt: start.elapsed(), reached: false });
+        };
+        sock.set_read_timeout(Some(left.max(Duration::from_millis(1)))).ok();
+        let Ok((n, peer)) = sock.recv_from(&mut buf) else {
+            return Ok(Echo { hop: None, rtt: start.elapsed(), reached: false });
+        };
+        let b: Vec<u8> = buf[..n].iter().map(|x| unsafe { x.assume_init() }).collect();
+        let b = if b.len() >= 20 && b[0] >> 4 == 4 { b[(b[0] & 0x0f) as usize * 4..].to_vec() } else { b };
+        if b.len() < 8 {
+            continue;
+        }
+        let hop = peer.as_socket_ipv4().map(|a| *a.ip());
+        match b[0] {
+            0 => {
+                let (rid, rseq) = (u16::from_be_bytes([b[4], b[5]]), u16::from_be_bytes([b[6], b[7]]));
+                if !raw || (rid == id && rseq == seq) {
+                    return Ok(Echo { hop, rtt: start.elapsed(), reached: true });
+                }
+            }
+            3 | 11 => {
+                // внутри — IP-заголовок исходной пробы + 8 байт ICMP: сверяем id/seq
+                let d = &b[8..];
+                if d.len() >= 20 {
+                    let ihl = (d[0] & 0x0f) as usize * 4;
+                    if d.len() >= ihl + 8 {
+                        let oid = u16::from_be_bytes([d[ihl + 4], d[ihl + 5]]);
+                        let oseq = u16::from_be_bytes([d[ihl + 6], d[ihl + 7]]);
+                        if oid == id && oseq == seq {
+                            return Ok(Echo { hop, rtt: start.elapsed(), reached: false });
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn cmd(c: &str, args: &[&str]) -> String {
+    Command::new(c)
+        .args(args)
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default()
+}
+
+pub fn default_gateway() -> Result<Ipv4Addr, String> {
+    if let Ok(t) = std::fs::read_to_string("/proc/net/route") {
+        // маршрут 0.0.0.0 с флагом RTF_GATEWAY и минимальной метрикой
+        let mut best: Option<(u64, Ipv4Addr)> = None;
+        for l in t.lines().skip(1) {
+            let f: Vec<&str> = l.split_whitespace().collect();
+            if f.len() < 8 || f[1] != "00000000" {
+                continue;
+            }
+            let flags = u32::from_str_radix(f[3], 16).unwrap_or(0);
+            let gw = u32::from_str_radix(f[2], 16).unwrap_or(0);
+            let metric: u64 = f[6].parse().unwrap_or(u64::MAX);
+            if flags & 2 == 0 || gw == 0 || best.map_or(false, |b| metric >= b.0) {
+                continue;
+            }
+            best = Some((metric, Ipv4Addr::from(gw.to_ne_bytes())));
+        }
+        return best.map(|b| b.1).ok_or_else(|| "маршрут по умолчанию не найден".into());
+    }
+    // macOS/BSD
+    for l in cmd("route", &["-n", "get", "default"]).lines() {
+        if let Some(v) = l.trim().strip_prefix("gateway:") {
+            if let Ok(ip) = v.trim().parse() {
+                return Ok(ip);
+            }
+        }
+    }
+    Err("маршрут по умолчанию не найден".into())
+}
+
+fn default_iface() -> String {
+    if let Ok(t) = std::fs::read_to_string("/proc/net/route") {
+        for l in t.lines().skip(1) {
+            let f: Vec<&str> = l.split_whitespace().collect();
+            if f.len() > 1 && f[1] == "00000000" {
+                return f[0].to_string();
+            }
+        }
+        return String::new();
+    }
+    for l in cmd("route", &["-n", "get", "default"]).lines() {
+        if let Some(v) = l.trim().strip_prefix("interface:") {
+            return v.trim().to_string();
+        }
+    }
+    String::new()
+}
+
+pub fn connection_type() -> String {
+    let i = default_iface();
+    if i.is_empty() {
+        return "неизвестно".into();
+    }
+    if cfg!(target_os = "linux") {
+        if std::path::Path::new(&format!("/sys/class/net/{i}/wireless")).exists() {
+            return format!("Wi-Fi ({i})");
+        }
+        if std::fs::read_to_string(format!("/sys/class/net/{i}/type")).map_or(false, |t| t.trim() == "1") {
+            return format!("Ethernet, кабель ({i})");
+        }
+    } else if i.starts_with("en") {
+        let o = cmd("/usr/sbin/networksetup", &["-getairportnetwork", &i]);
+        if i == "en0" && !o.is_empty() && !o.contains("not associated") && !o.contains("not a Wi-Fi") {
+            return format!("Wi-Fi ({i})");
+        }
+        return format!("Ethernet, кабель ({i})");
+    }
+    format!("неизвестно ({i})")
+}
+
+pub fn system_dns() -> Vec<String> {
+    let mut v: Vec<String> = vec![];
+    if cfg!(target_os = "macos") {
+        for l in cmd("scutil", &["--dns"]).lines() {
+            if let Some(r) = l.trim().strip_prefix("nameserver") {
+                if let Some(ip) = r.split_whitespace().last() {
+                    if ip.parse::<std::net::IpAddr>().is_ok() && !v.iter().any(|x| x == ip) {
+                        v.push(ip.to_string());
+                    }
+                }
+            }
+        }
+    }
+    if v.is_empty() {
+        for l in std::fs::read_to_string("/etc/resolv.conf").unwrap_or_default().lines() {
+            let f: Vec<&str> = l.split_whitespace().collect();
+            if f.len() >= 2 && f[0] == "nameserver" && f[1].parse::<std::net::IpAddr>().is_ok() {
+                v.push(f[1].to_string());
+            }
+        }
+    }
+    v
+}
+
+pub fn system_proxy() -> String {
+    for e in ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"] {
+        if let Ok(v) = std::env::var(e) {
+            if !v.is_empty() {
+                return if v.contains("://") { v } else { format!("http://{v}") };
+            }
+        }
+    }
+    String::new()
+}
+
+pub fn pac_url() -> String {
+    String::new()
+}
