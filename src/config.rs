@@ -11,7 +11,7 @@ pub const MTR_DEFAULT_HOST: &str = "8.8.8.8";
 
 // Автообновление: latest.json + публичный ключ ed25519 (base64)
 pub const UPDATE_URL: &str = "https://support.example.com/update/latest.json";
-pub const UPDATE_PUBKEY: &str = "";
+pub const UPDATE_PUBKEY: &str = "5blDiOdrT6GAvS3STrGOYEPxnJnGXRXlpymhvqWH/3Y=";
 
 // Приём отчётов
 pub const REPORT_URL: &str = "https://support.example.com/api/report";
