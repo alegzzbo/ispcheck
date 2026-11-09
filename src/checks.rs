@@ -69,6 +69,9 @@ fn check_link() {
     if let Some(d) = l.signal_dbm {
         s += &format!(", сигнал {d} дБм");
     }
+    if !l.band.is_empty() {
+        s += &format!(", {}", l.band_text());
+    }
     st().summ.link = s.clone();
     let weak = l.signal_pct.map_or(false, |p| p < 40) || l.signal_dbm.map_or(false, |d| d < -75);
     let slow_eth = l.kind == "ethernet" && l.rx_mbps > 0.0 && l.rx_mbps <= 100.0;
@@ -76,6 +79,9 @@ fn check_link() {
     if !l.ssid.is_empty() {
         let phy = if l.phy.is_empty() { String::new() } else { format!(", {}", l.phy) };
         log("·", format!("Wi-Fi сеть: {}{phy}", l.ssid));
+        if l.band == "2.4" {
+            log("·", "Диапазон 2,4 ГГц: больше помех и ниже максимальная скорость, чем на 5 ГГц");
+        }
     }
     if !l.duplex.is_empty() && l.duplex != "full" {
         log(WARN, format!("Дуплекс: {} (ожидается full)", l.duplex));

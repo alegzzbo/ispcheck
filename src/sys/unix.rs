@@ -220,6 +220,9 @@ pub fn link_info() -> Option<super::Link> {
                 }
             }
             l.signal_dbm = num_before(&o, "signal:").map(|v| v as i32);
+            if let Some(f) = num_before(&o, "freq:") {
+                l.set_freq(f as u32);
+            }
             l.rx_mbps = num_before(&o, "rx bitrate:").unwrap_or(0.0);
             l.tx_mbps = num_before(&o, "tx bitrate:").unwrap_or(0.0);
         } else {

@@ -229,8 +229,17 @@ fn phy_name(t: i32) -> &'static str {
     }
 }
 
-/// SSID, уровень сигнала (%), скорости и стандарт текущего Wi-Fi-подключения через WLAN API.
-fn wlan_current() -> Option<(String, u32, u32, u32, i32)> {
+struct Wlan {
+    ssid: String,
+    signal: u32,
+    rx_kbps: u32,
+    tx_kbps: u32,
+    phy: i32,
+    freq_khz: u32,
+}
+
+/// Текущее Wi-Fi-подключение через WLAN API: SSID, сигнал, скорости, стандарт и частота точки доступа.
+fn wlan_current() -> Option<Wlan> {
     use windows_sys::Win32::NetworkManagement::WiFi::*;
     unsafe {
         let mut ver = 0u32;
@@ -259,9 +268,41 @@ fn wlan_current() -> Option<(String, u32, u32, u32, i32)> {
                 if r == 0 && !data.is_null() {
                     let c = &*(data as *const WLAN_CONNECTION_ATTRIBUTES);
                     let a = &c.wlanAssociationAttributes;
-                    let n = (a.dot11Ssid.uSSIDLength as usize).min(32);
-                    let ssid = String::from_utf8_lossy(&a.dot11Ssid.ucSSID[..n]).into_owned();
-                    res = Some((ssid, a.wlanSignalQuality, a.ulRxRate, a.ulTxRate, a.dot11PhyType as i32));
+                    let len = (a.dot11Ssid.uSSIDLength as usize).min(32);
+                    let ssid = String::from_utf8_lossy(&a.dot11Ssid.ucSSID[..len]).into_owned();
+                    // частота: запись BSS-списка с тем же BSSID, что и у текущей точки доступа
+                    let mut freq_khz = 0u32;
+                    for secured in [1, 0] {
+                        let mut bl: *mut WLAN_BSS_LIST = std::ptr::null_mut();
+                        let rr = WlanGetNetworkBssList(
+                            h,
+                            &it.InterfaceGuid,
+                            &a.dot11Ssid,
+                            dot11_BSS_type_any,
+                            secured,
+                            std::ptr::null(),
+                            &mut bl,
+                        );
+                        if rr == 0 && !bl.is_null() {
+                            let cnt = (*bl).dwNumberOfItems as usize;
+                            let es = std::slice::from_raw_parts((*bl).wlanBssEntries.as_ptr(), cnt);
+                            if let Some(e) = es.iter().find(|e| e.dot11Bssid == a.dot11Bssid) {
+                                freq_khz = e.ulChCenterFrequency;
+                            }
+                            WlanFreeMemory(bl as *mut c_void);
+                        }
+                        if freq_khz != 0 {
+                            break;
+                        }
+                    }
+                    res = Some(Wlan {
+                        ssid,
+                        signal: a.wlanSignalQuality,
+                        rx_kbps: a.ulRxRate,
+                        tx_kbps: a.ulTxRate,
+                        phy: a.dot11PhyType as i32,
+                        freq_khz,
+                    });
                     WlanFreeMemory(data);
                     break;
                 }
@@ -292,16 +333,17 @@ pub fn link_info() -> Option<super::Link> {
         ..Default::default()
     };
     if a.if_type == 71 {
-        if let Some((ssid, sig, rx, tx, phy)) = wlan_current() {
-            l.ssid = ssid;
-            l.signal_pct = Some(sig);
-            if rx > 0 {
-                l.rx_mbps = rx as f64 / 1000.0; // Kbps
+        if let Some(w) = wlan_current() {
+            l.ssid = w.ssid;
+            l.signal_pct = Some(w.signal);
+            if w.rx_kbps > 0 {
+                l.rx_mbps = w.rx_kbps as f64 / 1000.0;
             }
-            if tx > 0 {
-                l.tx_mbps = tx as f64 / 1000.0;
+            if w.tx_kbps > 0 {
+                l.tx_mbps = w.tx_kbps as f64 / 1000.0;
             }
-            l.phy = phy_name(phy).into();
+            l.phy = phy_name(w.phy).into();
+            l.set_freq((w.freq_khz / 1000) as u32);
         }
     }
     Some(l)
