@@ -76,6 +76,9 @@ fn check_link() {
     let weak = l.signal_pct.map_or(false, |p| p < 40) || l.signal_dbm.map_or(false, |d| d < -75);
     let slow_eth = l.kind == "ethernet" && l.rx_mbps > 0.0 && l.rx_mbps <= 100.0;
     log(if weak || slow_eth { WARN } else { OK }, format!("Линк: {s}"));
+    if l.kind == "wifi" && l.ssid.is_empty() && cfg!(target_os = "macos") {
+        log("·", "SSID не показан: macOS скрывает его от приложений без доступа к геолокации");
+    }
     if !l.ssid.is_empty() {
         let phy = if l.phy.is_empty() { String::new() } else { format!(", {}", l.phy) };
         log("·", format!("Wi-Fi сеть: {}{phy}", l.ssid));

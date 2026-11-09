@@ -34,3 +34,6 @@ strip = true
 
 [target."cfg(windows)".build-dependencies]
 winresource = "0.1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-core-wlan = { version = "0.3", default-features = false, features = ["std", "CWWiFiClient", "CWInterface", "CWChannel", "CoreWLANTypes"] }

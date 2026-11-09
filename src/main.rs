@@ -18,6 +18,9 @@ use state::*;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::sync::{Arc, Mutex};
 
+/// Кнопка отправки показывается, только если задан REPORT_URL.
+const SEND_ENABLED: bool = !REPORT_URL.is_empty();
+
 static PENDING: Mutex<Option<(update::UpdInfo, update::UpdFile)>> = Mutex::new(None);
 
 fn login_path() -> std::path::PathBuf {
@@ -594,7 +597,7 @@ impl eframe::App for App {
                         self.start_check();
                     }
                     let can = self.can_send.load(Relaxed) && !working;
-                    if btn(ui, "↑  Отправить отчёт", 0, can) {
+                    if SEND_ENABLED && btn(ui, "↑  Отправить отчёт", 0, can) {
                         self.send();
                     }
                     if btn(ui, "Копировать отчёт", 0, true) {
@@ -660,7 +663,7 @@ impl eframe::App for App {
                     } else if self.sending.load(Relaxed) {
                         (palette::ACCENT, "Отправка отчёта…")
                     } else if self.can_send.load(Relaxed) {
-                        (palette::GREEN, "Готово. Отчёт можно отправить")
+                        (palette::GREEN, if SEND_ENABLED { "Готово. Отчёт можно отправить" } else { "Готово" })
                     } else {
                         (palette::TEXT_HINT, "Ожидание запуска")
                     };

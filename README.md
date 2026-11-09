@@ -35,7 +35,7 @@
 
 - **Windows:** права администратора не нужны. ICMP идёт через `iphlpapi`, данные об адаптерах и Wi-Fi через WinAPI, прокси из реестра. Внешние процессы (`netsh` и др.) не запускаются.
 - **Linux:** для MTR и трассировки нужен raw ICMP: `sudo setcap cap_net_raw+ep ./ispcheck` либо запуск от root. Без этого работает только обычный пинг. Данные Wi-Fi берутся из `iw`, если он установлен.
-- **macOS:** неподписанное приложение блокирует Gatekeeper: ПКМ → «Открыть» или `xattr -dr com.apple.quarantine ispcheck`. Данные Wi-Fi (SSID, сигнал, диапазон) на macOS не определяются.
+- **macOS:** неподписанное приложение блокирует Gatekeeper: ПКМ → «Открыть» или `xattr -dr com.apple.quarantine ispcheck`. Wi-Fi определяется через CoreWLAN (скорость, сигнал в дБм, диапазон, канал, стандарт). SSID macOS 14+ показывает только приложениям с доступом к геолокации, поэтому для обычного бинарника он будет пустым. Системный прокси и адрес PAC читаются из `scutil --proxy`.
 - Нужен OpenGL 2.0 и выше. На виртуальных машинах без графического ускорения окно может не открыться.
 
 ## Сборка
@@ -60,7 +60,7 @@ git push origin v1.0.1
 - `ISP_NAME`, `ISP_HOSTS`: название и узлы провайдера для пинга и трассировки
 - `OST_URL`: адрес OpenSpeedTest (без слэша в конце), `SPEED_SECONDS`, `THREADS`
 - `SITES`, `DNS_DOMAINS`, `PUBLIC_DNS`, `DOH_SERVERS`: что проверять
-- `REPORT_URL`, `REPORT_TOKEN`: куда отправлять отчёты
+- `REPORT_URL`, `REPORT_TOKEN`: куда отправлять отчёты (если `REPORT_URL` пустой, кнопка отправки не показывается)
 - `UPDATE_URL`, `UPDATE_PUBKEY`: автообновление
 - `MTR_CYCLES`, `MTR_DEFAULT_HOST`
 

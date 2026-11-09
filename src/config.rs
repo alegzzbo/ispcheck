@@ -14,7 +14,7 @@ pub const UPDATE_URL: &str = "https://support.example.com/update/latest.json";
 pub const UPDATE_PUBKEY: &str = "5blDiOdrT6GAvS3STrGOYEPxnJnGXRXlpymhvqWH/3Y=";
 
 // Приём отчётов
-pub const REPORT_URL: &str = "https://support.example.com/api/report";
+pub const REPORT_URL: &str = ""; // пусто — кнопка отправки скрыта
 pub const REPORT_TOKEN: &str = "CHANGE_ME";
 
 pub const ISP_HOSTS: &[&str] = &["speedtest.point.online", "point.online", "yandex.ru"];

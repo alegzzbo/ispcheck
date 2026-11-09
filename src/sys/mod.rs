@@ -13,6 +13,8 @@ mod windows;
 #[cfg(windows)]
 pub use windows::*;
 
+#[cfg(target_os = "macos")]
+mod macos;
 #[cfg(unix)]
 mod unix;
 #[cfg(unix)]

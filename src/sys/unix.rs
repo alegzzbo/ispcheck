@@ -146,6 +146,12 @@ pub fn connection_type() -> String {
             return format!("Ethernet, кабель ({i})");
         }
     } else if i.starts_with("en") {
+        #[cfg(target_os = "macos")]
+        if let Some(w) = super::macos::wifi() {
+            if w.iface == i {
+                return format!("Wi-Fi ({i})");
+            }
+        }
         let o = cmd("/usr/sbin/networksetup", &["-getairportnetwork", &i]);
         if i == "en0" && !o.is_empty() && !o.contains("not associated") && !o.contains("not a Wi-Fi") {
             return format!("Wi-Fi ({i})");
@@ -179,7 +185,42 @@ pub fn system_dns() -> Vec<String> {
     v
 }
 
+/// Разбор вывода `scutil --proxy` (macOS): (прокси-URL, адрес PAC).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn parse_scutil_proxy(out: &str) -> (String, String) {
+    let mut m = std::collections::HashMap::new();
+    for l in out.lines() {
+        if let Some((k, v)) = l.split_once(" : ") {
+            m.insert(k.trim().to_string(), v.trim().to_string());
+        }
+    }
+    let on = |k: &str| m.get(k).map_or(false, |v| v == "1");
+    let hp = |pre: &str| -> Option<String> {
+        if !on(&format!("{pre}Enable")) {
+            return None;
+        }
+        let h = m.get(&format!("{pre}Proxy"))?;
+        Some(match m.get(&format!("{pre}Port")) {
+            Some(p) => format!("{h}:{p}"),
+            None => h.clone(),
+        })
+    };
+    let proxy = hp("HTTPS")
+        .map(|v| format!("http://{v}"))
+        .or_else(|| hp("HTTP").map(|v| format!("http://{v}")))
+        .or_else(|| hp("SOCKS").map(|v| format!("socks5://{v}")))
+        .unwrap_or_default();
+    let pac = if on("ProxyAutoConfigEnable") { m.get("ProxyAutoConfigURLString").cloned().unwrap_or_default() } else { String::new() };
+    (proxy, pac)
+}
+
 pub fn system_proxy() -> String {
+    if cfg!(target_os = "macos") {
+        let (p, _) = parse_scutil_proxy(&cmd("scutil", &["--proxy"]));
+        if !p.is_empty() {
+            return p;
+        }
+    }
     for e in ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"] {
         if let Ok(v) = std::env::var(e) {
             if !v.is_empty() {
@@ -191,6 +232,9 @@ pub fn system_proxy() -> String {
 }
 
 pub fn pac_url() -> String {
+    if cfg!(target_os = "macos") {
+        return parse_scutil_proxy(&cmd("scutil", &["--proxy"])).1;
+    }
     String::new()
 }
 
@@ -202,7 +246,7 @@ fn num_before(s: &str, key: &str) -> Option<f64> {
     })
 }
 
-/// Linux: /sys/class/net и `iw` (если установлен); macOS: ifconfig (только Ethernet).
+/// Linux: /sys/class/net и `iw` (если установлен); macOS: CoreWLAN (Wi-Fi) и ifconfig (Ethernet).
 pub fn link_info() -> Option<super::Link> {
     let i = default_iface();
     if i.is_empty() {
@@ -238,6 +282,20 @@ pub fn link_info() -> Option<super::Link> {
             l.duplex = std::fs::read_to_string(format!("/sys/class/net/{i}/duplex")).unwrap_or_default().trim().to_string();
         }
     } else {
+        #[cfg(target_os = "macos")]
+        if let Some(w) = super::macos::wifi() {
+            if w.iface == i {
+                l.kind = "wifi".into();
+                l.ssid = w.ssid;
+                l.rx_mbps = w.rate;
+                l.tx_mbps = w.rate;
+                l.signal_dbm = Some(w.rssi);
+                l.channel = w.channel;
+                l.band = w.band.into();
+                l.phy = w.phy.into();
+                return Some(l);
+            }
+        }
         l.kind = "ethernet".into();
         let o = cmd("ifconfig", &[&i]);
         if let Some(m) = o.lines().find(|x| x.trim_start().starts_with("media:")) {
@@ -254,4 +312,20 @@ pub fn link_info() -> Option<super::Link> {
         }
     }
     Some(l)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_scutil_proxy;
+
+    #[test]
+    fn scutil_proxy() {
+        let out = "<dictionary> {\n  ExceptionsList : <array> {\n    0 : *.local\n  }\n  HTTPEnable : 1\n  HTTPPort : 8080\n  HTTPProxy : proxy.corp.lan\n  HTTPSEnable : 0\n  ProxyAutoConfigEnable : 1\n  ProxyAutoConfigURLString : http://wpad.corp.lan/proxy.pac\n}\n";
+        let (p, pac) = parse_scutil_proxy(out);
+        assert_eq!(p, "http://proxy.corp.lan:8080");
+        assert_eq!(pac, "http://wpad.corp.lan/proxy.pac");
+        let (p, pac) = parse_scutil_proxy("<dictionary> {\n  SOCKSEnable : 1\n  SOCKSPort : 1080\n  SOCKSProxy : 10.0.0.1\n}\n");
+        assert_eq!((p.as_str(), pac.as_str()), ("socks5://10.0.0.1:1080", ""));
+        assert_eq!(parse_scutil_proxy("<dictionary> {\n  HTTPEnable : 0\n}\n").0, "");
+    }
 }
