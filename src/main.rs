@@ -242,6 +242,7 @@ struct App {
     can_send: Arc<AtomicBool>,
     updating: Arc<AtomicBool>,
     themed: bool,
+    copied_at: Option<std::time::Instant>,
 }
 
 impl App {
@@ -271,6 +272,7 @@ impl App {
             sending: Default::default(),
             can_send: Default::default(),
             updating: Default::default(),
+            copied_at: None,
             themed: false,
         }
     }
@@ -600,8 +602,11 @@ impl eframe::App for App {
                     if SEND_ENABLED && btn(ui, "↑  Отправить отчёт", 0, can) {
                         self.send();
                     }
-                    if btn(ui, "Копировать отчёт", 0, true) {
-                        ctx.copy_text(report());
+                    let just_copied = self.copied_at.map_or(false, |t| t.elapsed().as_millis() < 1500);
+                    if btn(ui, if just_copied { "✓  Скопировано" } else { "Копировать отчёт" }, 0, true) {
+                        ctx.copy_text(text());
+                        self.copied_at = Some(std::time::Instant::now());
+                        ctx.request_repaint_after(std::time::Duration::from_millis(1600));
                     }
                     if working {
                         ui.add_space(6.0);

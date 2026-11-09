@@ -100,15 +100,30 @@ struct Adapter {
     dns: Vec<String>,
     rx_bps: u64,
     tx_bps: u64,
+    up: bool, // OperStatus == Up (кабель/сеть подключены)
 }
 
+/// Скорость линка в Мбит/с; Windows отдаёт u64::MAX (-1), если скорость неизвестна.
+fn mbps(bps: u64) -> f64 {
+    if bps == 0 || bps >= 1 << 50 {
+        0.0
+    } else {
+        bps as f64 / 1e6
+    }
+}
+
+/// Активный адаптер: тот, через который идёт маршрут до 8.8.8.8. Адаптеры с отключённым кабелем
+/// (OperStatus != Up) пропускаются: берётся рабочий адаптер со шлюзом и наименьшей метрикой.
 fn active_adapter() -> Option<Adapter> {
-    let s = UdpSocket::bind("0.0.0.0:0").ok()?;
-    s.connect("8.8.8.8:53").ok()?; // пакеты не отправляются
-    let local = match s.local_addr().ok()?.ip() {
-        IpAddr::V4(v) => v,
-        _ => return None,
-    };
+    let local = UdpSocket::bind("0.0.0.0:0").ok().and_then(|s| {
+        s.connect("8.8.8.8:53").ok()?; // пакеты не отправляются
+        match s.local_addr().ok()?.ip() {
+            IpAddr::V4(v) => Some(v),
+            _ => None,
+        }
+    });
+    // (адаптер, адрес маршрута принадлежит ему, есть шлюз и IPv4, метрика)
+    let mut all: Vec<(Adapter, bool, bool, u32)> = vec![];
     let mut size = 15000u32;
     for _ in 0..3 {
         let mut buf = vec![0u64; (size as usize + 7) / 8];
@@ -126,42 +141,67 @@ fn active_adapter() -> Option<Adapter> {
             let mut a = head as *const IP_ADAPTER_ADDRESSES_LH;
             while !a.is_null() {
                 let ad = &*a;
+                a = ad.Next;
+                let (mut has_v4, mut is_local) = (false, false);
                 let mut u = ad.FirstUnicastAddress;
                 while !u.is_null() {
-                    if sockaddr_ip((*u).Address.lpSockaddr as *const u8) == Some(IpAddr::V4(local)) {
-                        let mut dns: Vec<String> = vec![];
-                        let mut d = ad.FirstDnsServerAddress;
-                        while !d.is_null() {
-                            if let Some(ip) = sockaddr_ip((*d).Address.lpSockaddr as *const u8) {
-                                let s = ip.to_string();
-                                // заглушки Windows fec0:0:0:ffff::1-3
-                                if !s.starts_with("fec0:0:0:ffff:") && !dns.contains(&s) {
-                                    dns.push(s);
-                                }
-                            }
-                            d = (*d).Next;
-                        }
-                        return Some(Adapter {
-                            if_type: ad.IfType,
-                            name: wide(ad.FriendlyName),
-                            dns,
-                            rx_bps: ad.ReceiveLinkSpeed,
-                            tx_bps: ad.TransmitLinkSpeed,
-                        });
+                    if let Some(IpAddr::V4(v)) = sockaddr_ip((*u).Address.lpSockaddr as *const u8) {
+                        has_v4 = true;
+                        is_local |= Some(v) == local;
                     }
                     u = (*u).Next;
                 }
-                a = ad.Next;
+                let mut dns: Vec<String> = vec![];
+                let mut d = ad.FirstDnsServerAddress;
+                while !d.is_null() {
+                    if let Some(ip) = sockaddr_ip((*d).Address.lpSockaddr as *const u8) {
+                        let s = ip.to_string();
+                        // заглушки Windows fec0:0:0:ffff::1-3
+                        if !s.starts_with("fec0:0:0:ffff:") && !dns.contains(&s) {
+                            dns.push(s);
+                        }
+                    }
+                    d = (*d).Next;
+                }
+                let has_gw = has_v4 && !ad.FirstGatewayAddress.is_null();
+                all.push((
+                    Adapter {
+                        if_type: ad.IfType,
+                        name: wide(ad.FriendlyName),
+                        dns,
+                        rx_bps: ad.ReceiveLinkSpeed,
+                        tx_bps: ad.TransmitLinkSpeed,
+                        up: ad.OperStatus == 1,
+                    },
+                    is_local,
+                    has_gw,
+                    ad.Ipv4Metric,
+                ));
             }
         }
-        return None;
+        break;
     }
-    None
+    // 1) адаптер маршрута, если он подключён; 2) лучший подключённый со шлюзом; 3) адаптер маршрута как есть
+    if let Some(i) = all.iter().position(|a| a.1 && a.0.up) {
+        return Some(all.swap_remove(i).0);
+    }
+    let best = all
+        .iter()
+        .enumerate()
+        .filter(|(_, a)| a.0.up && a.2 && a.0.if_type != 24 && a.0.if_type != 131)
+        .min_by_key(|(_, a)| a.3)
+        .map(|(i, _)| i);
+    if let Some(i) = best {
+        return Some(all.swap_remove(i).0);
+    }
+    let i = all.iter().position(|a| a.1)?;
+    Some(all.swap_remove(i).0)
 }
 
 pub fn connection_type() -> String {
     match active_adapter() {
         None => "неизвестно".into(),
+        Some(a) if !a.up => format!("{} — нет подключения", a.name),
         Some(a) => match a.if_type {
             71 => format!("Wi-Fi ({})", a.name),
             6 => format!("Ethernet, кабель ({})", a.name),
@@ -319,6 +359,9 @@ fn wlan_current() -> Option<Wlan> {
 
 pub fn link_info() -> Option<super::Link> {
     let a = active_adapter()?;
+    if !a.up {
+        return None;
+    }
     let mut l = super::Link {
         kind: match a.if_type {
             71 => "wifi",
@@ -328,8 +371,8 @@ pub fn link_info() -> Option<super::Link> {
         }
         .into(),
         name: a.name.clone(),
-        rx_mbps: a.rx_bps as f64 / 1e6,
-        tx_mbps: a.tx_bps as f64 / 1e6,
+        rx_mbps: mbps(a.rx_bps),
+        tx_mbps: mbps(a.tx_bps),
         ..Default::default()
     };
     if a.if_type == 71 {

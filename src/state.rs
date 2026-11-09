@@ -82,10 +82,6 @@ pub fn text() -> String {
     format!("{}{}", g.report, g.live)
 }
 
-pub fn report() -> String {
-    st().report.clone()
-}
-
 pub fn reset() {
     let mut g = st();
     g.report.clear();
