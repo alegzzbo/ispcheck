@@ -1,7 +1,8 @@
 # Сборка ispcheck (Rust)
 
 Настройки провайдера: `src/config.rs`. Версия: `version` в `Cargo.toml`.
-Иконка exe (необязательно): положите `favicon.ico` рядом с `Cargo.toml`, сборка на Windows встроит её сама.
+Иконка (необязательно): `favicon.ico` рядом с `Cargo.toml`. Она попадает в иконку окна/панели задач на всех ОС и в сам exe при сборке на Windows. Файл нужно закоммитить в репозиторий. После добавления или замены иконки пересоберите проект.
+Шрифт символов (✔ ✖ ⚠ ▶): `assets/symbols.ttf`, подмножество DejaVu Sans Mono, лицензия в `assets/LICENSE-DejaVu.txt`.
 
 ## Windows
 1. Скачать и запустить https://rustup.rs (`rustup-init.exe`), везде Enter (профиль по умолчанию, MSVC).

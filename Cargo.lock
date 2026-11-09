@@ -1422,6 +1422,7 @@ dependencies = [
  "eframe",
  "gethostname",
  "hex",
+ "image",
  "reqwest",
  "rustls",
  "serde",

@@ -32,109 +32,199 @@ fn login_path() -> std::path::PathBuf {
 // ─── Цветовая палитра ───────────────────────────────────────────────
 mod palette {
     use eframe::egui::Color32;
-    // Фон
-    pub const BG_DARK: Color32 = Color32::from_rgb(22, 27, 34);
-    pub const BG_PANEL: Color32 = Color32::from_rgb(30, 37, 46);
-    pub const BG_INPUT: Color32 = Color32::from_rgb(38, 47, 58);
-    pub const BG_HOVER: Color32 = Color32::from_rgb(48, 58, 72);
+    // Фон — три уровня глубины
+    pub const BG_BASE: Color32 = Color32::from_rgb(17, 21, 28);
+    pub const BG_PANEL: Color32 = Color32::from_rgb(25, 31, 40);
+    pub const BG_CARD: Color32 = Color32::from_rgb(32, 39, 50);
+    pub const BG_INPUT: Color32 = Color32::from_rgb(22, 27, 35);
+    pub const BG_HOVER: Color32 = Color32::from_rgb(42, 52, 65);
     // Рамки
-    pub const BORDER: Color32 = Color32::from_rgb(56, 68, 82);
+    pub const BORDER: Color32 = Color32::from_rgb(52, 63, 78);
     pub const BORDER_FOCUS: Color32 = Color32::from_rgb(88, 166, 255);
     // Текст
     pub const TEXT: Color32 = Color32::from_rgb(230, 237, 243);
-    pub const TEXT_DIM: Color32 = Color32::from_rgb(139, 148, 158);
-    pub const TEXT_HINT: Color32 = Color32::from_rgb(100, 110, 120);
+    pub const TEXT_SEC: Color32 = Color32::from_rgb(155, 165, 176);
+    pub const TEXT_HINT: Color32 = Color32::from_rgb(90, 100, 112);
     // Акценты
     pub const ACCENT: Color32 = Color32::from_rgb(88, 166, 255);
     pub const GREEN: Color32 = Color32::from_rgb(63, 185, 80);
+    pub const GREEN_DIM: Color32 = Color32::from_rgb(35, 90, 45);
     pub const RED: Color32 = Color32::from_rgb(248, 81, 73);
+    pub const RED_DIM: Color32 = Color32::from_rgb(100, 35, 32);
     pub const YELLOW: Color32 = Color32::from_rgb(210, 167, 52);
-    #[allow(dead_code)]
-    pub const CYAN: Color32 = Color32::from_rgb(57, 211, 211);
+    pub const YELLOW_DIM: Color32 = Color32::from_rgb(90, 72, 22);
+    pub const ACCENT_DIM: Color32 = Color32::from_rgb(30, 56, 90);
     // Кнопки
     pub const BTN_PRIMARY: Color32 = Color32::from_rgb(35, 134, 54);
     pub const BTN_PRIMARY_HOVER: Color32 = Color32::from_rgb(46, 160, 67);
-    pub const BTN_SECONDARY: Color32 = Color32::from_rgb(48, 54, 61);
+    pub const BTN_SECONDARY: Color32 = Color32::from_rgb(44, 50, 58);
     pub const BTN_SECONDARY_HOVER: Color32 = Color32::from_rgb(55, 62, 71);
-    pub const BTN_DANGER: Color32 = Color32::from_rgb(218, 54, 51);
-    pub const BTN_DANGER_HOVER: Color32 = Color32::from_rgb(248, 81, 73);
+    pub const BTN_DANGER: Color32 = Color32::from_rgb(160, 40, 38);
+    pub const BTN_DANGER_HOVER: Color32 = Color32::from_rgb(200, 55, 50);
 }
+
+use egui::Color32;
 
 fn apply_theme(ctx: &egui::Context) {
     use palette::*;
 
     ctx.style_mut_of(egui::Theme::Dark, |style| {
         let v = &mut style.visuals;
-
         v.dark_mode = true;
         v.override_text_color = Some(TEXT);
 
         // Окно
-        v.window_fill = BG_PANEL;
+        v.window_fill = BG_CARD;
         v.window_stroke = egui::Stroke::new(1.0, BORDER);
         v.window_shadow = egui::epaint::Shadow {
-            offset: [0, 4],
-            blur: 12,
-            spread: 0,
-            color: Color32::from_black_alpha(80),
+            offset: [0, 6],
+            blur: 16,
+            spread: 2,
+            color: Color32::from_black_alpha(100),
         };
-        v.window_corner_radius = egui::CornerRadius::same(10);
+        v.window_corner_radius = egui::CornerRadius::same(12);
 
         // Панели
-        v.panel_fill = BG_DARK;
+        v.panel_fill = BG_BASE;
 
         // Виджеты
         let w = &mut v.widgets;
-        // Неактивные
         w.noninteractive.bg_fill = BG_INPUT;
         w.noninteractive.bg_stroke = egui::Stroke::new(1.0, BORDER);
-        w.noninteractive.fg_stroke = egui::Stroke::new(1.0, TEXT_DIM);
-        w.noninteractive.corner_radius = egui::CornerRadius::same(6);
+        w.noninteractive.fg_stroke = egui::Stroke::new(1.0, TEXT_SEC);
+        w.noninteractive.corner_radius = egui::CornerRadius::same(8);
 
-        // Неактивные кнопки/элементы
         w.inactive.bg_fill = BTN_SECONDARY;
         w.inactive.bg_stroke = egui::Stroke::new(1.0, BORDER);
         w.inactive.fg_stroke = egui::Stroke::new(1.0, TEXT);
-        w.inactive.corner_radius = egui::CornerRadius::same(6);
+        w.inactive.corner_radius = egui::CornerRadius::same(8);
 
-        // При наведении
         w.hovered.bg_fill = BTN_SECONDARY_HOVER;
         w.hovered.bg_stroke = egui::Stroke::new(1.0, BORDER_FOCUS);
         w.hovered.fg_stroke = egui::Stroke::new(1.0, TEXT);
-        w.hovered.corner_radius = egui::CornerRadius::same(6);
+        w.hovered.corner_radius = egui::CornerRadius::same(8);
 
-        // При нажатии
         w.active.bg_fill = BG_HOVER;
-        w.active.bg_stroke = egui::Stroke::new(1.5, ACCENT);
+        w.active.bg_stroke = egui::Stroke::new(2.0, ACCENT);
         w.active.fg_stroke = egui::Stroke::new(1.0, TEXT);
-        w.active.corner_radius = egui::CornerRadius::same(6);
+        w.active.corner_radius = egui::CornerRadius::same(8);
 
-        // Открытое (выделенное)
         w.open.bg_fill = BG_HOVER;
         w.open.bg_stroke = egui::Stroke::new(1.0, ACCENT);
         w.open.fg_stroke = egui::Stroke::new(1.0, TEXT);
-        w.open.corner_radius = egui::CornerRadius::same(6);
+        w.open.corner_radius = egui::CornerRadius::same(8);
 
-        // Текстовые поля: курсор, выделение
+        // Курсор и выделение
         v.text_cursor.stroke = egui::Stroke::new(2.0, ACCENT);
-        v.selection.bg_fill = Color32::from_rgba_premultiplied(88, 166, 255, 60);
+        v.selection.bg_fill = Color32::from_rgba_premultiplied(60, 110, 180, 140);
         v.selection.stroke = egui::Stroke::new(0.0, Color32::TRANSPARENT);
 
-        // Разделители
-        v.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, BORDER);
-
-        // Скроллбар
         v.extreme_bg_color = BG_INPUT;
 
-        // Пространство между элементами
-        style.spacing.item_spacing = egui::vec2(8.0, 6.0);
-        style.spacing.button_padding = egui::vec2(14.0, 5.0);
+        // Пространство
+        style.spacing.item_spacing = egui::vec2(8.0, 5.0);
+        style.spacing.button_padding = egui::vec2(16.0, 6.0);
         style.spacing.window_margin = egui::Margin::same(16);
     });
     ctx.set_theme(egui::Theme::Dark);
 }
 
-use egui::Color32;
+// ─── Вспомогательные функции UI ─────────────────────────────────────
+
+/// Фрейм-карточка с фоном, скруглением и тенью.
+fn card_frame() -> egui::Frame {
+    egui::Frame::new()
+        .fill(palette::BG_CARD)
+        .corner_radius(10.0)
+        .inner_margin(egui::Margin::same(12))
+        .stroke(egui::Stroke::new(1.0, palette::BORDER))
+        .shadow(egui::epaint::Shadow {
+            offset: [0, 2],
+            blur: 8,
+            spread: 0,
+            color: Color32::from_black_alpha(50),
+        })
+}
+
+/// Маленький заголовок секции.
+fn section_title(ui: &mut egui::Ui, title: &str) {
+    ui.label(
+        egui::RichText::new(title)
+            .size(12.5)
+            .color(palette::TEXT_SEC),
+    );
+    ui.add_space(2.0);
+}
+
+/// Стилизованная кнопка (цвета по состоянию задаются стилем, без перерисовки поверх).
+fn btn(ui: &mut egui::Ui, label: &str, kind: u8, enabled: bool) -> bool {
+    let (fill, hover_fill) = match kind {
+        1 => (palette::BTN_PRIMARY, palette::BTN_PRIMARY_HOVER),
+        2 => (palette::BTN_DANGER, palette::BTN_DANGER_HOVER),
+        _ => (palette::BTN_SECONDARY, palette::BTN_SECONDARY_HOVER),
+    };
+    let text_col = if enabled { palette::TEXT } else { palette::TEXT_HINT };
+    let r = ui
+        .scope(|ui| {
+            let (f, h) = if enabled { (fill, hover_fill) } else { (palette::BG_INPUT, palette::BG_INPUT) };
+            let w = &mut ui.style_mut().visuals.widgets;
+            for (st, c) in [(&mut w.inactive, f), (&mut w.hovered, h), (&mut w.active, h)] {
+                st.weak_bg_fill = c;
+                st.bg_fill = c;
+            }
+            ui.add_enabled(
+                enabled,
+                egui::Button::new(egui::RichText::new(label).size(13.0).color(text_col)).min_size(egui::vec2(0.0, 30.0)),
+            )
+        })
+        .inner;
+    if enabled {
+        r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+    } else {
+        false
+    }
+}
+
+/// «Чип» со статусом.
+fn chip(ui: &mut egui::Ui, text: &str, color: Color32) {
+    egui::Frame::new()
+        .fill(palette::BG_INPUT)
+        .stroke(egui::Stroke::new(1.0, palette::BORDER))
+        .corner_radius(10.0)
+        .inner_margin(egui::Margin::symmetric(9, 3))
+        .show(ui, |ui| {
+            ui.label(egui::RichText::new(text).size(12.0).color(color));
+        });
+}
+
+// ─── App ─────────────────────────────────────────────────────────────
+
+fn setup_fonts(ctx: &egui::Context) {
+    // Маленький шрифт символов (подмножество DejaVu Sans Mono, лицензия в assets/LICENSE-DejaVu.txt):
+    // ✔ ✖ ⚠ ▶ ─ • ↑ ↓ ■ рисуются одинаково на всех системах.
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(
+        "symbols".into(),
+        std::sync::Arc::new(egui::FontData::from_static(include_bytes!("../assets/symbols.ttf"))),
+    );
+    for fam in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+        if let Some(v) = fonts.families.get_mut(&fam) {
+            v.insert(1.min(v.len()), "symbols".into()); // раньше встроенных emoji-шрифтов
+        }
+    }
+    ctx.set_fonts(fonts);
+}
+
+#[cfg(has_icon)]
+fn window_icon() -> Option<egui::IconData> {
+    let img = image::load_from_memory(include_bytes!("../favicon.ico")).ok()?.into_rgba8();
+    let (width, height) = img.dimensions();
+    Some(egui::IconData { rgba: img.into_raw(), width, height })
+}
+#[cfg(not(has_icon))]
+fn window_icon() -> Option<egui::IconData> {
+    None
+}
 
 struct App {
     login: String,
@@ -148,12 +238,13 @@ struct App {
     sending: Arc<AtomicBool>,
     can_send: Arc<AtomicBool>,
     updating: Arc<AtomicBool>,
-    theme_applied: bool,
+    themed: bool,
 }
 
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         set_ctx(cc.egui_ctx.clone());
+        setup_fonts(&cc.egui_ctx);
         let ctx = cc.egui_ctx.clone();
         std::thread::spawn(move || {
             update::cleanup();
@@ -177,7 +268,7 @@ impl App {
             sending: Default::default(),
             can_send: Default::default(),
             updating: Default::default(),
-            theme_applied: false,
+            themed: false,
         }
     }
 
@@ -243,80 +334,26 @@ impl App {
     }
 }
 
-/// Стилизованная кнопка: primary (зелёная), secondary (серая), danger (красная).
-fn styled_button(ui: &mut egui::Ui, label: &str, kind: &str, enabled: bool) -> bool {
-    use palette::*;
-    let (fill, fill_hover) = match kind {
-        "primary" => (BTN_PRIMARY, BTN_PRIMARY_HOVER),
-        "danger" => (BTN_DANGER, BTN_DANGER_HOVER),
-        _ => (BTN_SECONDARY, BTN_SECONDARY_HOVER),
-    };
-    let text_color = if enabled { TEXT } else { TEXT_DIM };
-    let btn = egui::Button::new(
-        egui::RichText::new(label).color(text_color),
-    )
-    .fill(if enabled { fill } else { BG_INPUT })
-    .corner_radius(6.0)
-    .stroke(egui::Stroke::new(1.0, if enabled { BORDER } else { Color32::from_rgb(45, 55, 65) }));
-    let resp = ui.add_enabled(enabled, btn);
-    // Подкрашиваем при наведении вручную через перерисовку фона
-    if resp.hovered() && enabled {
-        ui.painter().rect_filled(resp.rect, 6.0, fill_hover);
-        // перерисовываем текст поверх
-        ui.painter().text(
-            resp.rect.center(),
-            egui::Align2::CENTER_CENTER,
-            label,
-            egui::FontId::proportional(14.0),
-            TEXT,
-        );
-    }
-    resp.clicked()
-}
+// ─── Рендеринг лога с цветными бейджами ─────────────────────────────
 
-/// Заголовок секции с иконкой.
-fn section_label(ui: &mut egui::Ui, icon: &str, text: &str) {
-    ui.horizontal(|ui| {
-        ui.add_space(2.0);
-        ui.label(egui::RichText::new(icon).size(14.0).color(palette::ACCENT));
-        ui.label(
-            egui::RichText::new(text)
-                .size(13.0)
-                .color(palette::TEXT_DIM),
-        );
-    });
-}
-
-/// Разделитель-линия.
-fn separator_line(ui: &mut egui::Ui) {
-    let rect = ui.available_rect_before_wrap();
-    let y = rect.top() + 1.0;
-    ui.painter().line_segment(
-        [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
-        egui::Stroke::new(1.0, palette::BORDER),
-    );
-    ui.add_space(4.0);
-}
-
-/// Рисует раскрашенный лог в ScrollArea.
 fn render_log(ui: &mut egui::Ui) {
     let txt = text();
     if txt.is_empty() {
-        ui.centered_and_justified(|ui| {
+        ui.add_space(40.0);
+        ui.vertical_centered(|ui| {
             ui.label(
-                egui::RichText::new("Нажмите «Начать проверку», чтобы запустить диагностику")
+                egui::RichText::new("Нажмите  Начать проверку  для запуска диагностики")
                     .size(14.0)
                     .color(palette::TEXT_HINT),
             );
         });
         return;
     }
-    let job = colorize_log(&txt, ui.style());
+    let job = build_log_layout(&txt);
     ui.add(egui::Label::new(job).selectable(true));
 }
 
-/// Создаёт LayoutJob с подсветкой маркеров.
-fn colorize_log(text: &str, _style: &egui::Style) -> egui::text::LayoutJob {
+fn build_log_layout(text: &str) -> egui::text::LayoutJob {
     let mut job = egui::text::LayoutJob::default();
     job.wrap = egui::text::TextWrapping {
         max_rows: usize::MAX,
@@ -324,311 +361,322 @@ fn colorize_log(text: &str, _style: &egui::Style) -> egui::text::LayoutJob {
         overflow_character: None,
         max_width: f32::INFINITY,
     };
-    let mono = egui::FontId::monospace(13.0);
-    let mono_bold = egui::FontId::monospace(13.0);
+
+    let mono = egui::FontId::monospace(12.5);
+
+    let fmt = |color: Color32| egui::text::TextFormat {
+        font_id: mono.clone(),
+        color,
+        ..Default::default()
+    };
+
+    let badge = |bg: Color32, fg: Color32| egui::text::TextFormat {
+        font_id: egui::FontId::monospace(11.0),
+        color: fg,
+        background: bg,
+        ..Default::default()
+    };
+
+    let header_fmt = egui::text::TextFormat {
+        font_id: egui::FontId::monospace(12.5),
+        color: palette::ACCENT,
+        background: palette::ACCENT_DIM,
+        ..Default::default()
+    };
 
     for line in text.split('\n') {
         if line.is_empty() {
-            job.append("\n", 0.0, egui::text::TextFormat {
-                font_id: mono.clone(),
-                color: palette::TEXT,
-                ..Default::default()
-            });
+            job.append("\n", 0.0, fmt(palette::TEXT));
             continue;
         }
-        // Определяем маркер (первый символ/слово)
-        let (marker, rest) = if line.starts_with('✔') {
-            ("✔", &line[OK.len()..])
-        } else if line.starts_with('✖') {
-            ("✖", &line[BAD.len()..])
-        } else if line.starts_with('⚠') {
-            ("⚠", &line[WARN.len()..])
-        } else if line.starts_with('▶') {
-            ("▶", &line[HDR.len()..])
-        } else if line.starts_with('─') {
-            // Линия-разделитель → тонкая линия в цвет границы
-            job.append(line, 0.0, egui::text::TextFormat {
-                font_id: mono.clone(),
-                color: palette::BORDER,
-                ..Default::default()
-            });
-            job.append("\n", 0.0, egui::text::TextFormat {
-                font_id: mono.clone(),
-                color: palette::TEXT,
-                ..Default::default()
-            });
-            continue;
-        } else if line.starts_with('·') {
-            ("·", &line['·'.len_utf8()..])
+
+        // Определяем тип строки по маркеру
+        if let Some(rest) = strip_marker(line, OK) {
+            // Зелёный бейдж OK
+            job.append(" ✔ ", 0.0, badge(palette::GREEN_DIM, palette::GREEN));
+            job.append(rest, 4.0, fmt(palette::TEXT));
+        } else if let Some(rest) = strip_marker(line, BAD) {
+            // Красный бейдж ERR
+            job.append(" ✖ ", 0.0, badge(palette::RED_DIM, palette::RED));
+            job.append(rest, 4.0, fmt(palette::RED));
+        } else if let Some(rest) = strip_marker(line, WARN) {
+            // Жёлтый бейдж
+            job.append(" ⚠ ", 0.0, badge(palette::YELLOW_DIM, palette::YELLOW));
+            job.append(rest, 4.0, fmt(palette::YELLOW));
+        } else if let Some(rest) = strip_marker(line, HDR) {
+            // Заголовок секции — полоса с акцентным фоном
+            job.append(&format!("  ▶  {}  ", rest.trim()), 0.0, header_fmt.clone());
+        } else if line.starts_with(SEP) {
+            // Разделитель — тонкая линия
+            job.append(&"─".repeat(56), 0.0, fmt(palette::BORDER));
+        } else if let Some(rest) = strip_marker(line, "\u{00B7}") {
+            // Маркер-точка ·
+            job.append("  •  ", 0.0, fmt(palette::TEXT_HINT));
+            job.append(rest, 0.0, fmt(palette::TEXT_SEC));
         } else {
-            ("", line)
-        };
-
-        let (marker_color, text_color, bold) = match marker {
-            "✔" => (palette::GREEN, palette::TEXT, false),
-            "✖" => (palette::RED, palette::RED, false),
-            "⚠" => (palette::YELLOW, palette::YELLOW, false),
-            "▶" => (palette::ACCENT, palette::ACCENT, true),
-            "·" => (palette::TEXT_DIM, palette::TEXT_DIM, false),
-            _ => (palette::TEXT, palette::TEXT, false),
-        };
-
-        if !marker.is_empty() {
-            job.append(marker, 0.0, egui::text::TextFormat {
-                font_id: if bold { mono_bold.clone() } else { mono.clone() },
-                color: marker_color,
-                ..Default::default()
-            });
+            // Обычный текст (MTR-таблицы и пр.)
+            job.append(line, 0.0, fmt(palette::TEXT_SEC));
         }
-
-        job.append(rest, 0.0, egui::text::TextFormat {
-            font_id: mono.clone(),
-            color: text_color,
-            ..Default::default()
-        });
-
-        job.append("\n", 0.0, egui::text::TextFormat {
-            font_id: mono.clone(),
-            color: palette::TEXT,
-            ..Default::default()
-        });
+        job.append("\n", 0.0, fmt(palette::TEXT));
     }
-
     job
 }
+
+/// Отделяет маркер от текста строки, возвращая остаток.
+fn strip_marker<'a>(line: &'a str, marker: &str) -> Option<&'a str> {
+    if line.starts_with(marker) {
+        Some(&line[marker.len()..])
+    } else {
+        None
+    }
+}
+
+// ─── Главный UI ──────────────────────────────────────────────────────
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _: &mut eframe::Frame) {
         let ctx = &ui.ctx().clone();
 
-        if !self.theme_applied {
+        if !self.themed {
             apply_theme(ctx);
-            self.theme_applied = true;
+            self.themed = true;
         }
 
         let busy = self.busy.load(Relaxed);
         let mtr_on = self.mtr_run.load(Relaxed);
         let working = busy || mtr_on || self.sending.load(Relaxed);
 
-        // ── Диалог обновления ─────────────────────────────────────
+        // ── Диалог обновления ────────────────────────────────────
         let pending = PENDING.lock().unwrap().clone();
         if let Some((info, f)) = pending {
-            egui::Window::new(
-                egui::RichText::new("🔄 Обновление").size(16.0).color(palette::TEXT),
-            )
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
-                ui.add_space(4.0);
-                ui.label(
-                    egui::RichText::new(format!(
-                        "Доступна версия {} (у вас {}).",
-                        info.version,
-                        update::VERSION
-                    ))
-                    .size(14.0)
-                    .color(palette::TEXT),
-                );
-                if !info.notes.is_empty() {
+            egui::Window::new("Обновление")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
                     ui.add_space(4.0);
                     ui.label(
-                        egui::RichText::new(&info.notes)
-                            .size(13.0)
-                            .color(palette::TEXT_DIM),
+                        egui::RichText::new(format!(
+                            "Доступна версия {} (у вас {}).",
+                            info.version,
+                            update::VERSION
+                        ))
+                        .size(14.0),
                     );
-                }
-                ui.add_space(8.0);
-                if self.updating.load(Relaxed) {
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        ui.label(
-                            egui::RichText::new("Загрузка и проверка…")
-                                .color(palette::TEXT_DIM),
-                        );
-                    });
-                } else {
-                    ui.horizontal(|ui| {
-                        if styled_button(ui, "Обновить", "primary", true) {
-                            self.updating.store(true, Relaxed);
-                            let up = self.updating.clone();
-                            std::thread::spawn(move || match update::install_and_restart(&f) {
-                                Ok(()) => std::process::exit(0),
-                                Err(e) => {
-                                    *PENDING.lock().unwrap() = None;
-                                    up.store(false, Relaxed);
-                                    logf!(BAD, "Обновление не удалось: {e}");
-                                }
-                            });
-                        }
-                        if styled_button(ui, "Позже", "secondary", true) {
-                            *PENDING.lock().unwrap() = None;
-                        }
-                    });
-                }
-            });
+                    if !info.notes.is_empty() {
+                        ui.add_space(4.0);
+                        ui.label(egui::RichText::new(&info.notes).size(13.0).color(palette::TEXT_SEC));
+                    }
+                    ui.add_space(8.0);
+                    if self.updating.load(Relaxed) {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label(egui::RichText::new("Загрузка и проверка...").color(palette::TEXT_SEC));
+                        });
+                    } else {
+                        ui.horizontal(|ui| {
+                            if btn(ui, "Обновить", 1, true) {
+                                self.updating.store(true, Relaxed);
+                                let up = self.updating.clone();
+                                std::thread::spawn(move || match update::install_and_restart(&f) {
+                                    Ok(()) => std::process::exit(0),
+                                    Err(e) => {
+                                        *PENDING.lock().unwrap() = None;
+                                        up.store(false, Relaxed);
+                                        logf!(BAD, "Обновление не удалось: {e}");
+                                    }
+                                });
+                            }
+                            if btn(ui, "Позже", 0, true) {
+                                *PENDING.lock().unwrap() = None;
+                            }
+                        });
+                    }
+                });
         }
 
-        // ── Верхняя панель ────────────────────────────────────────
+        // ── Верхняя панель ───────────────────────────────────────
         egui::Panel::top("top")
-            .frame(egui::Frame::new().fill(palette::BG_PANEL).inner_margin(egui::Margin::symmetric(12, 0)))
+            .frame(
+                egui::Frame::new()
+                    .fill(palette::BG_PANEL)
+                    .inner_margin(egui::Margin::symmetric(16, 8))
+                    .shadow(egui::epaint::Shadow {
+                        offset: [0, 3],
+                        blur: 10,
+                        spread: 0,
+                        color: Color32::from_black_alpha(60),
+                    }),
+            )
             .show(ui, |ui| {
-                ui.add_space(8.0);
-
-                // Заголовок приложения
+                // Заголовок
                 ui.horizontal(|ui| {
-                    ui.add_space(4.0);
-                    ui.label(
-                        egui::RichText::new("🌐")
-                            .size(20.0),
-                    );
                     ui.label(
                         egui::RichText::new(format!("{} — диагностика", ISP_NAME))
                             .size(17.0)
                             .color(palette::TEXT)
                             .strong(),
                     );
-                    ui.label(
-                        egui::RichText::new(format!("v{}", update::VERSION))
-                            .size(12.0)
-                            .color(palette::TEXT_DIM),
+                    ui.label(egui::RichText::new(format!("v{}", update::VERSION)).size(11.5).color(palette::TEXT_HINT));
+                });
+
+                let (link, ip4, down, up, dns_bad) = {
+                    let g = st();
+                    (g.summ.link.clone(), g.summ.ip4.clone(), g.summ.down, g.summ.up, !g.summ.dns_problem.is_empty())
+                };
+                if !link.is_empty() || !ip4.is_empty() || down > 0.0 {
+                    ui.add_space(4.0);
+                    ui.horizontal_wrapped(|ui| {
+                        if !link.is_empty() {
+                            chip(ui, &link, palette::ACCENT);
+                        }
+                        if !ip4.is_empty() {
+                            chip(ui, &format!("IP {ip4}"), palette::TEXT_SEC);
+                        }
+                        if down > 0.0 || up > 0.0 {
+                            chip(ui, &format!("↓ {down:.0}   ↑ {up:.0} Мбит/с"), palette::GREEN);
+                        }
+                        if dns_bad {
+                            chip(ui, "проблема DNS", palette::YELLOW);
+                        }
+                    });
+                }
+
+                ui.add_space(8.0);
+
+                // ── Карточка: Логин + Сайты + Комментарий ────────
+                card_frame().show(ui, |ui| {
+                    // Логин
+                    section_title(ui, "Логин");
+                    let r = ui.add(
+                        egui::TextEdit::singleline(&mut self.login)
+                            .hint_text(egui::RichText::new("Ваш логин в системе провайдера").color(palette::TEXT_HINT))
+                            .text_color(palette::TEXT)
+                            .desired_width(f32::INFINITY),
+                    );
+                    if r.changed() {
+                        let p = login_path();
+                        if let Some(d) = p.parent() {
+                            let _ = std::fs::create_dir_all(d);
+                        }
+                        let _ = std::fs::write(p, self.login.trim());
+                    }
+
+                    ui.add_space(8.0);
+
+                    // Сайты
+                    section_title(ui, "Сайты, которые не открываются (по одному в строке)");
+                    ui.add(
+                        egui::TextEdit::multiline(&mut self.extra)
+                            .hint_text(egui::RichText::new("example.com\nother-site.org").color(palette::TEXT_HINT))
+                            .text_color(palette::TEXT)
+                            .desired_rows(3)
+                            .desired_width(f32::INFINITY),
+                    );
+
+                    ui.add_space(8.0);
+
+                    // Комментарий
+                    section_title(ui, "Комментарий");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.note)
+                            .hint_text(egui::RichText::new("Опишите проблему (необязательно)").color(palette::TEXT_HINT))
+                            .text_color(palette::TEXT)
+                            .desired_width(f32::INFINITY),
                     );
                 });
 
-                ui.add_space(6.0);
-                separator_line(ui);
-                ui.add_space(2.0);
-
-                // Логин
-                section_label(ui, "👤", "Логин");
-                ui.add_space(2.0);
-                let r = ui.add(
-                    egui::TextEdit::singleline(&mut self.login)
-                        .hint_text(
-                            egui::RichText::new("Ваш логин в системе провайдера")
-                                .color(palette::TEXT_HINT),
-                        )
-                        .text_color(palette::TEXT)
-                        .desired_width(f32::INFINITY),
-                );
-                if r.changed() {
-                    let p = login_path();
-                    if let Some(d) = p.parent() {
-                        let _ = std::fs::create_dir_all(d);
-                    }
-                    let _ = std::fs::write(p, self.login.trim());
-                }
-
-                ui.add_space(6.0);
-
-                // Проблемные сайты
-                section_label(ui, "🔗", "Сайты, которые не открываются");
-                ui.add_space(2.0);
-                ui.add(
-                    egui::TextEdit::multiline(&mut self.extra)
-                        .hint_text(
-                            egui::RichText::new("example.com\nother-site.org")
-                                .color(palette::TEXT_HINT),
-                        )
-                        .text_color(palette::TEXT)
-                        .desired_rows(3)
-                        .desired_width(f32::INFINITY),
-                );
-
-                ui.add_space(4.0);
-
-                // Комментарий
-                section_label(ui, "💬", "Комментарий");
-                ui.add_space(2.0);
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.note)
-                        .hint_text(
-                            egui::RichText::new("Опишите проблему (необязательно)")
-                                .color(palette::TEXT_HINT),
-                        )
-                        .text_color(palette::TEXT)
-                        .desired_width(f32::INFINITY),
-                );
-
                 ui.add_space(8.0);
-                separator_line(ui);
-                ui.add_space(2.0);
 
-                // Кнопки действий
+                // ── Кнопки действий ──────────────────────────────
                 ui.horizontal(|ui| {
-                    if styled_button(ui, "▶  Начать проверку", "primary", !busy && !mtr_on) {
+                    if btn(ui, "▶  Начать проверку", 1, !busy && !mtr_on) {
                         self.start_check();
                     }
                     let can = self.can_send.load(Relaxed) && !working;
-                    if styled_button(ui, "📤  Отправить отчёт", "secondary", can) {
+                    if btn(ui, "↑  Отправить отчёт", 0, can) {
                         self.send();
                     }
-                    if styled_button(ui, "📋  Копировать", "secondary", true) {
+                    if btn(ui, "Копировать отчёт", 0, true) {
                         ctx.copy_text(report());
                     }
                     if working {
-                        ui.add_space(4.0);
+                        ui.add_space(6.0);
                         ui.spinner();
                         ui.label(
                             egui::RichText::new(if busy {
-                                "Проверка…"
+                                "Проверка..."
                             } else if mtr_on {
-                                "MTR…"
+                                "MTR..."
                             } else {
-                                "Отправка…"
+                                "Отправка..."
                             })
-                            .size(13.0)
-                            .color(palette::TEXT_DIM),
+                            .size(12.5)
+                            .color(palette::TEXT_SEC),
                         );
                     }
                 });
 
                 ui.add_space(6.0);
 
-                // MTR секция
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("📡")
-                            .size(14.0),
-                    );
-                    ui.label(
-                        egui::RichText::new("MTR до:")
-                            .size(13.0)
-                            .color(palette::TEXT_DIM),
-                    );
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.mtr_host)
-                            .text_color(palette::TEXT)
-                            .desired_width(160.0),
-                    );
-                    ui.label(
-                        egui::RichText::new("циклов (0 = ∞):")
-                            .size(13.0)
-                            .color(palette::TEXT_DIM),
-                    );
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.mtr_cycles)
-                            .text_color(palette::TEXT)
-                            .desired_width(50.0),
-                    );
-                    let stopping = mtr_on && self.mtr_stop.load(Relaxed);
-                    let (label, kind) = if mtr_on {
-                        ("⏹  Остановить", "danger")
-                    } else {
-                        ("▶  Запустить MTR", "secondary")
-                    };
-                    if styled_button(ui, label, kind, !busy && !stopping) {
-                        self.toggle_mtr();
-                    }
+                // ── Карточка: MTR ────────────────────────────────
+                card_frame().show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("MTR до:").size(12.5).color(palette::TEXT_SEC));
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.mtr_host)
+                                .text_color(palette::TEXT)
+                                .desired_width(170.0),
+                        );
+                        ui.label(egui::RichText::new("циклов (0 = беск.):").size(12.5).color(palette::TEXT_SEC));
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.mtr_cycles)
+                                .text_color(palette::TEXT)
+                                .desired_width(50.0),
+                        );
+                        let stopping = mtr_on && self.mtr_stop.load(Relaxed);
+                        if mtr_on {
+                            if btn(ui, "■  Остановить", 2, !stopping) {
+                                self.toggle_mtr();
+                            }
+                        } else if btn(ui, "▶  Запустить MTR", 0, !busy) {
+                            self.toggle_mtr();
+                        }
+                    });
                 });
 
-                ui.add_space(8.0);
+                ui.add_space(4.0);
             });
 
-        // ── Центральная панель: лог ───────────────────────────────
-        egui::CentralPanel::default()
+        // ── Строка состояния ─────────────────────────────────────
+        egui::Panel::bottom("status")
+            .frame(egui::Frame::new().fill(palette::BG_PANEL).inner_margin(egui::Margin::symmetric(14, 5)))
             .show(ui, |ui| {
-                ui.style_mut().visuals.extreme_bg_color = palette::BG_DARK;
+                ui.horizontal(|ui| {
+                    let (dot, txt) = if busy {
+                        (palette::YELLOW, "Идёт проверка…")
+                    } else if mtr_on {
+                        (palette::YELLOW, "Идёт MTR…")
+                    } else if self.sending.load(Relaxed) {
+                        (palette::ACCENT, "Отправка отчёта…")
+                    } else if self.can_send.load(Relaxed) {
+                        (palette::GREEN, "Готово. Отчёт можно отправить")
+                    } else {
+                        (palette::TEXT_HINT, "Ожидание запуска")
+                    };
+                    ui.label(egui::RichText::new("●").size(11.0).color(dot));
+                    ui.label(egui::RichText::new(txt).size(12.0).color(palette::TEXT_SEC));
+                });
+            });
+
+        // ── Центральная панель: лог ──────────────────────────────
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::new()
+                    .fill(palette::BG_BASE)
+                    .inner_margin(egui::Margin::symmetric(12, 4)),
+            )
+            .show(ui, |ui| {
                 egui::ScrollArea::both()
                     .auto_shrink([false; 2])
                     .stick_to_bottom(true)
@@ -644,11 +692,13 @@ impl eframe::App for App {
 fn main() -> eframe::Result<()> {
     // TLS-провайдер ring (без C++/cmake/NASM)
     let _ = rustls::crypto::ring::default_provider().install_default();
-    let opts = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([780.0, 680.0])
-            .with_title(format!("{ISP_NAME} — проверка соединения v{}", update::VERSION)),
-        ..Default::default()
-    };
+    let mut vp = egui::ViewportBuilder::default()
+            .with_inner_size([780.0, 700.0])
+        .with_min_inner_size([620.0, 480.0])
+        .with_title(format!("{ISP_NAME} — проверка соединения v{}", update::VERSION));
+    if let Some(ic) = window_icon() {
+        vp = vp.with_icon(ic);
+    }
+    let opts = eframe::NativeOptions { viewport: vp, ..Default::default() };
     eframe::run_native("ispcheck", opts, Box::new(|cc| Ok(Box::new(App::new(cc)))))
 }

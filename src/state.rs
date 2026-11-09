@@ -19,6 +19,7 @@ pub struct Summ {
     pub ip4: String,
     pub ip_proxy: String,
     pub ipv6: String,
+    pub link: String,
     pub down: f64,
     pub up: f64,
     pub pings: Vec<String>,
@@ -34,6 +35,7 @@ pub struct Inner {
     pub ip4: String,
     pub ip6: String,
     pub ip_proxy: String,
+    pub link: Option<crate::sys::Link>,
 }
 
 static STATE: OnceLock<Mutex<Inner>> = OnceLock::new();
@@ -92,4 +94,5 @@ pub fn reset() {
     g.ip4.clear();
     g.ip6.clear();
     g.ip_proxy.clear();
+    g.link = None;
 }

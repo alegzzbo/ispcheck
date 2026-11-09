@@ -94,7 +94,15 @@ unsafe fn wide(p: *const u16) -> String {
 
 /// Активный адаптер — тот, чей адрес выбирается для маршрута до 8.8.8.8:
 /// (IfType, имя, DNS-серверы адаптера).
-fn active_adapter() -> Option<(u32, String, Vec<String>)> {
+struct Adapter {
+    if_type: u32,
+    name: String,
+    dns: Vec<String>,
+    rx_bps: u64,
+    tx_bps: u64,
+}
+
+fn active_adapter() -> Option<Adapter> {
     let s = UdpSocket::bind("0.0.0.0:0").ok()?;
     s.connect("8.8.8.8:53").ok()?; // пакеты не отправляются
     let local = match s.local_addr().ok()?.ip() {
@@ -133,7 +141,13 @@ fn active_adapter() -> Option<(u32, String, Vec<String>)> {
                             }
                             d = (*d).Next;
                         }
-                        return Some((ad.IfType, wide(ad.FriendlyName), dns));
+                        return Some(Adapter {
+                            if_type: ad.IfType,
+                            name: wide(ad.FriendlyName),
+                            dns,
+                            rx_bps: ad.ReceiveLinkSpeed,
+                            tx_bps: ad.TransmitLinkSpeed,
+                        });
                     }
                     u = (*u).Next;
                 }
@@ -148,18 +162,18 @@ fn active_adapter() -> Option<(u32, String, Vec<String>)> {
 pub fn connection_type() -> String {
     match active_adapter() {
         None => "неизвестно".into(),
-        Some((t, name, _)) => match t {
-            71 => format!("Wi-Fi ({name})"),
-            6 => format!("Ethernet, кабель ({name})"),
-            131 | 53 | 23 => format!("Туннель/VPN ({name})"),
-            _ => format!("другой ({name})"),
+        Some(a) => match a.if_type {
+            71 => format!("Wi-Fi ({})", a.name),
+            6 => format!("Ethernet, кабель ({})", a.name),
+            131 | 53 | 23 => format!("Туннель/VPN ({})", a.name),
+            _ => format!("другой ({})", a.name),
         },
     }
 }
 
 /// DNS активного адаптера (статика или DHCP).
 pub fn system_dns() -> Vec<String> {
-    active_adapter().map(|a| a.2).unwrap_or_default()
+    active_adapter().map(|a| a.dns).unwrap_or_default()
 }
 
 fn inet_key() -> Option<RegKey> {
@@ -199,4 +213,96 @@ pub fn system_proxy() -> String {
 /// Адрес PAC-скрипта (автонастройка прокси), если задан.
 pub fn pac_url() -> String {
     inet_key().and_then(|k| k.get_value::<String, _>("AutoConfigURL").ok()).unwrap_or_default()
+}
+
+fn phy_name(t: i32) -> &'static str {
+    match t {
+        5 => "802.11a",
+        6 => "802.11b",
+        7 => "802.11g",
+        8 => "802.11n (Wi-Fi 4)",
+        9 => "802.11ac (Wi-Fi 5)",
+        10 => "802.11ad",
+        11 => "802.11ax (Wi-Fi 6)",
+        12 => "802.11be (Wi-Fi 7)",
+        _ => "",
+    }
+}
+
+/// SSID, уровень сигнала (%), скорости и стандарт текущего Wi-Fi-подключения через WLAN API.
+fn wlan_current() -> Option<(String, u32, u32, u32, i32)> {
+    use windows_sys::Win32::NetworkManagement::WiFi::*;
+    unsafe {
+        let mut ver = 0u32;
+        let mut h = std::ptr::null_mut();
+        if WlanOpenHandle(2, std::ptr::null(), &mut ver, &mut h) != 0 {
+            return None;
+        }
+        let mut res = None;
+        let mut list: *mut WLAN_INTERFACE_INFO_LIST = std::ptr::null_mut();
+        if WlanEnumInterfaces(h, std::ptr::null(), &mut list) == 0 && !list.is_null() {
+            let n = (*list).dwNumberOfItems as usize;
+            let items = std::slice::from_raw_parts((*list).InterfaceInfo.as_ptr(), n);
+            for it in items {
+                let mut size = 0u32;
+                let mut data: *mut c_void = std::ptr::null_mut();
+                let mut vt = 0;
+                let r = WlanQueryInterface(
+                    h,
+                    &it.InterfaceGuid,
+                    wlan_intf_opcode_current_connection,
+                    std::ptr::null(),
+                    &mut size,
+                    &mut data,
+                    &mut vt,
+                );
+                if r == 0 && !data.is_null() {
+                    let c = &*(data as *const WLAN_CONNECTION_ATTRIBUTES);
+                    let a = &c.wlanAssociationAttributes;
+                    let n = (a.dot11Ssid.uSSIDLength as usize).min(32);
+                    let ssid = String::from_utf8_lossy(&a.dot11Ssid.ucSSID[..n]).into_owned();
+                    res = Some((ssid, a.wlanSignalQuality, a.ulRxRate, a.ulTxRate, a.dot11PhyType as i32));
+                    WlanFreeMemory(data);
+                    break;
+                }
+                if !data.is_null() {
+                    WlanFreeMemory(data);
+                }
+            }
+            WlanFreeMemory(list as *mut c_void);
+        }
+        WlanCloseHandle(h, std::ptr::null());
+        res
+    }
+}
+
+pub fn link_info() -> Option<super::Link> {
+    let a = active_adapter()?;
+    let mut l = super::Link {
+        kind: match a.if_type {
+            71 => "wifi",
+            6 => "ethernet",
+            131 | 53 | 23 => "vpn",
+            _ => "other",
+        }
+        .into(),
+        name: a.name.clone(),
+        rx_mbps: a.rx_bps as f64 / 1e6,
+        tx_mbps: a.tx_bps as f64 / 1e6,
+        ..Default::default()
+    };
+    if a.if_type == 71 {
+        if let Some((ssid, sig, rx, tx, phy)) = wlan_current() {
+            l.ssid = ssid;
+            l.signal_pct = Some(sig);
+            if rx > 0 {
+                l.rx_mbps = rx as f64 / 1000.0; // Kbps
+            }
+            if tx > 0 {
+                l.tx_mbps = tx as f64 / 1000.0;
+            }
+            l.phy = phy_name(phy).into();
+        }
+    }
+    Some(l)
 }

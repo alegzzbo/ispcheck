@@ -193,3 +193,62 @@ pub fn system_proxy() -> String {
 pub fn pac_url() -> String {
     String::new()
 }
+
+fn num_before(s: &str, key: &str) -> Option<f64> {
+    s.lines().find_map(|l| {
+        let l = l.trim();
+        let r = l.strip_prefix(key)?;
+        r.split_whitespace().next()?.parse().ok()
+    })
+}
+
+/// Linux: /sys/class/net и `iw` (если установлен); macOS: ifconfig (только Ethernet).
+pub fn link_info() -> Option<super::Link> {
+    let i = default_iface();
+    if i.is_empty() {
+        return None;
+    }
+    let mut l = super::Link { name: i.clone(), kind: "other".into(), ..Default::default() };
+    if cfg!(target_os = "linux") {
+        let wifi = std::path::Path::new(&format!("/sys/class/net/{i}/wireless")).exists();
+        if wifi {
+            l.kind = "wifi".into();
+            let o = cmd("iw", &["dev", &i, "link"]);
+            for ln in o.lines() {
+                if let Some(v) = ln.trim().strip_prefix("SSID:") {
+                    l.ssid = v.trim().to_string();
+                }
+            }
+            l.signal_dbm = num_before(&o, "signal:").map(|v| v as i32);
+            l.rx_mbps = num_before(&o, "rx bitrate:").unwrap_or(0.0);
+            l.tx_mbps = num_before(&o, "tx bitrate:").unwrap_or(0.0);
+        } else {
+            l.kind = "ethernet".into();
+            let sp: f64 = std::fs::read_to_string(format!("/sys/class/net/{i}/speed"))
+                .ok()
+                .and_then(|t| t.trim().parse().ok())
+                .unwrap_or(0.0);
+            if sp > 0.0 {
+                l.rx_mbps = sp;
+                l.tx_mbps = sp;
+            }
+            l.duplex = std::fs::read_to_string(format!("/sys/class/net/{i}/duplex")).unwrap_or_default().trim().to_string();
+        }
+    } else {
+        l.kind = "ethernet".into();
+        let o = cmd("ifconfig", &[&i]);
+        if let Some(m) = o.lines().find(|x| x.trim_start().starts_with("media:")) {
+            if let Some(p) = m.find("base") {
+                let digits: String = m[..p].chars().rev().take_while(|c| c.is_ascii_digit()).collect::<Vec<_>>().into_iter().rev().collect();
+                if let Ok(v) = digits.parse::<f64>() {
+                    l.rx_mbps = v;
+                    l.tx_mbps = v;
+                }
+            }
+            if m.contains("full-duplex") {
+                l.duplex = "full".into();
+            }
+        }
+    }
+    Some(l)
+}

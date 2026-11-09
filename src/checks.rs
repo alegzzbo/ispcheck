@@ -51,16 +51,51 @@ pub fn check_connection_info() {
     let c = sys::connection_type();
     st().summ.conn = c.clone();
     log(OK, format!("Соединение: {c}"));
+    check_link();
 }
 
-pub fn check_gateway() {
+/// Скорость линка Ethernet/Wi-Fi (согласованная, а не измеренная).
+fn check_link() {
+    let Some(l) = sys::link_info() else { return };
+    st().link = Some(l.clone());
+    if l.rx_mbps <= 0.0 && l.tx_mbps <= 0.0 {
+        log(WARN, format!("Скорость линка {} ({}): не определена", l.kind_ru(), l.name));
+        return;
+    }
+    let mut s = format!("{} {:.0}/{:.0} Мбит/с (приём/передача)", l.kind_ru(), l.rx_mbps, l.tx_mbps);
+    if let Some(p) = l.signal_pct {
+        s += &format!(", сигнал {p}%");
+    }
+    if let Some(d) = l.signal_dbm {
+        s += &format!(", сигнал {d} дБм");
+    }
+    st().summ.link = s.clone();
+    let weak = l.signal_pct.map_or(false, |p| p < 40) || l.signal_dbm.map_or(false, |d| d < -75);
+    let slow_eth = l.kind == "ethernet" && l.rx_mbps > 0.0 && l.rx_mbps <= 100.0;
+    log(if weak || slow_eth { WARN } else { OK }, format!("Линк: {s}"));
+    if !l.ssid.is_empty() {
+        let phy = if l.phy.is_empty() { String::new() } else { format!(", {}", l.phy) };
+        log("·", format!("Wi-Fi сеть: {}{phy}", l.ssid));
+    }
+    if !l.duplex.is_empty() && l.duplex != "full" {
+        log(WARN, format!("Дуплекс: {} (ожидается full)", l.duplex));
+    }
+    if slow_eth {
+        log(WARN, "Порт работает на 100 Мбит/с или ниже: проверьте кабель, разъёмы и порт роутера");
+    }
+    if weak {
+        log(WARN, "Слабый сигнал Wi-Fi: скорость и стабильность будут ниже");
+    }
+}
+
+pub fn check_gateway() -> bool {
     log(HDR, "Шлюз по умолчанию");
     let gw = match sys::default_gateway() {
         Ok(g) => g,
         Err(e) => {
             st().summ.gw = "не определён".into();
             log(BAD, format!("не определён: {e}"));
-            return;
+            return false;
         }
     };
     const N: usize = 8;
@@ -69,7 +104,7 @@ pub fn check_gateway() {
         match sys::icmp_echo(gw, 64, Duration::from_secs(1)) {
             Err(e) => {
                 log(WARN, format!("{gw}: ICMP недоступен: {e}"));
-                return;
+                return true;
             }
             Ok(r) if r.reached => ts.push(ms(r.rtt)),
             _ => {}
@@ -79,13 +114,42 @@ pub fn check_gateway() {
     if ts.is_empty() {
         st().summ.gw = format!("{gw}: не отвечает на ICMP");
         log(WARN, format!("{gw}: не отвечает на ICMP (возможно, фильтруется роутером)"));
-        return;
+        return true;
     }
     let (avg, jit) = avg_jitter(&ts);
     let loss = 100.0 * (N - ts.len()) as f64 / N as f64;
     let s = format!("{gw}: {avg:.1} мс, джиттер {jit:.1} мс, потери {loss:.0}%");
     st().summ.gw = s.clone();
     log(if loss > 0.0 || avg > 20.0 { WARN } else { OK }, s);
+    true
+}
+
+/// Есть ли выход в интернет: TCP/443 до публичных адресов (параллельно), либо через системный прокси.
+pub fn internet_reachable() -> bool {
+    let hs: Vec<_> = ["1.1.1.1:443", "8.8.8.8:443", "77.88.8.8:443"]
+        .into_iter()
+        .map(|a| {
+            std::thread::spawn(move || {
+                a.parse::<SocketAddr>()
+                    .ok()
+                    .map_or(false, |a| TcpStream::connect_timeout(&a, Duration::from_secs(2)).is_ok())
+            })
+        })
+        .collect();
+    let direct = hs.into_iter().fold(false, |acc, h| h.join().unwrap_or(false) || acc);
+    if direct {
+        return true;
+    }
+    let proxy = sys::system_proxy();
+    !proxy.is_empty()
+        && reqwest::Proxy::all(&proxy)
+            .map(|p| !get_ip("https://api.ipify.org", Client::builder().proxy(p).timeout(Duration::from_secs(5))).is_empty())
+            .unwrap_or(false)
+}
+
+/// Отвечает ли сервер OpenSpeedTest (любой HTTP-ответ).
+fn ost_reachable() -> Result<(), String> {
+    http(4).build().map_err(|e| e.to_string())?.get(OST_URL).send().map(|_| ()).map_err(|e| e.to_string())
 }
 
 fn get_ip(url: &str, b: ClientBuilder) -> String {
@@ -150,7 +214,7 @@ pub fn detect_ip() {
     }
 }
 
-pub fn check_system_dns() {
+pub fn check_system_dns(online: bool) {
     log(HDR, "DNS-серверы системы");
     let s = sys::system_dns();
     if s.is_empty() {
@@ -159,6 +223,9 @@ pub fn check_system_dns() {
         let j = s.join(", ");
         st().summ.dns = j.clone();
         log(OK, format!("DNS адаптера: {j}"));
+    }
+    if !online {
+        return;
     }
     // whoami.akamai.net возвращает IP резолвера, дошедшего до интернета
     match dns::lookup_host("whoami.akamai.net", Duration::from_secs(3)) {
@@ -437,6 +504,11 @@ fn speed(down: bool) -> f64 {
 
 pub fn check_speed() {
     log(HDR, "Скорость (OpenSpeedTest)");
+    if let Err(e) = ost_reachable() {
+        log(BAD, format!("{OST_URL} недоступен ({e}): замер скорости пропущен"));
+        return;
+    }
+    let link = st().link.clone();
     for (name, down) in [("Загрузка", true), ("Отдача", false)] {
         let v = speed(down);
         if down {
@@ -445,6 +517,12 @@ pub fn check_speed() {
             st().summ.up = v;
         }
         log(if v < 1.0 { BAD } else { OK }, format!("{name}: {v:.1} Мбит/с"));
+        if let Some(l) = &link {
+            let lim = if down { l.rx_mbps } else { l.tx_mbps };
+            if lim > 0.0 && v > lim * 0.8 {
+                log(WARN, format!("Результат близок к скорости линка ({lim:.0} Мбит/с): замер упирается в линк, а не в провайдера"));
+            }
+        }
     }
 }
 
@@ -544,6 +622,7 @@ pub fn log_summary() {
         }
     };
     p("Соединение", &s.conn);
+    p("Линк", &s.link);
     p("IP", &s.ip4);
     p("IP через прокси", &s.ip_proxy);
     p("DNS", &s.dns);
@@ -572,9 +651,22 @@ pub fn log_summary() {
 pub fn run_all(list: Vec<String>) {
     log(HDR, format!("Тест {ISP_NAME} — {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S")));
     check_connection_info();
-    check_gateway();
+    let gw_ok = check_gateway();
+    let online = internet_reachable();
+    if !online {
+        if !gw_ok {
+            log(BAD, "Шлюз по умолчанию не задан и интернет недоступен: проверьте IP, маску, шлюз и кабель/Wi-Fi");
+        } else {
+            log(BAD, "Интернет недоступен (нет соединения с 1.1.1.1, 8.8.8.8, 77.88.8.8 по TCP/443)");
+        }
+        log(WARN, "Проверки, требующие интернет, пропущены");
+        check_system_dns(false);
+        log_summary();
+        log(HDR, "Готово.");
+        return;
+    }
     detect_ip();
-    check_system_dns();
+    check_system_dns(true);
     check_ping();
     check_dns();
     check_sites();
@@ -593,16 +685,16 @@ pub fn run_all(list: Vec<String>) {
 }
 
 pub fn send_report(login: &str, note: &str) -> Result<(), String> {
-    let (body, ip4, ip6, ipp) = {
+    let (body, ip4, ip6, ipp, link) = {
         let g = st();
-        (g.report.clone(), g.ip4.clone(), g.ip6.clone(), g.ip_proxy.clone())
+        (g.report.clone(), g.ip4.clone(), g.ip6.clone(), g.ip_proxy.clone(), g.link.clone())
     };
     let payload = serde_json::json!({
         "isp": ISP_NAME, "login": login, "version": env!("CARGO_PKG_VERSION"),
         "time": chrono::Local::now().to_rfc3339(), "ip4": ip4, "ip6": ip6, "ip_proxy": ipp,
         "host": gethostname::gethostname().to_string_lossy(),
         "os": format!("{}/{}", std::env::consts::OS, std::env::consts::ARCH),
-        "note": note, "report": body,
+        "link": link, "note": note, "report": body,
     });
     let r = http(20)
         .build()
