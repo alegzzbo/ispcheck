@@ -47,24 +47,37 @@ struct Data {
     ierr: Option<String>,
 }
 
-fn rdns() -> &'static Mutex<HashMap<String, String>> {
-    static R: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+type RdnsMap = HashMap<String, (String, Instant)>;
+
+fn rdns() -> &'static Mutex<RdnsMap> {
+    static R: OnceLock<Mutex<RdnsMap>> = OnceLock::new();
     R.get_or_init(Default::default)
 }
 
+/// Кэш имён сбрасывается при каждом запуске MTR: после смены сети имена могут быть другими.
+fn clear_rdns() {
+    rdns().lock().unwrap_or_else(|e| e.into_inner()).clear();
+}
+
 /// Обратный DNS в фоне: сначала пусто, имя появится в следующих обновлениях таблицы.
+/// Неудачный поиск повторяется не чаще раза в 30 с.
 fn rdns_name(ip: &str) -> String {
-    let mut m = rdns().lock().unwrap();
-    if let Some(n) = m.get(ip) {
-        return n.clone();
+    let mut m = rdns().lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((n, t)) = m.get(ip) {
+        if !n.is_empty() || t.elapsed() < Duration::from_secs(30) {
+            return n.clone();
+        }
     }
-    m.insert(ip.to_string(), String::new());
+    m.insert(ip.to_string(), (String::new(), Instant::now()));
     let ip = ip.to_string();
     std::thread::spawn(move || {
         if let Ok(a) = ip.parse::<std::net::IpAddr>() {
             if let Ok(n) = dns_lookup::lookup_addr(&a) {
                 if n != ip {
-                    rdns().lock().unwrap().insert(ip, n.trim_end_matches('.').to_string());
+                    rdns().lock().unwrap_or_else(|e| e.into_inner()).insert(
+                        ip,
+                        (n.trim_end_matches('.').to_string(), Instant::now()),
+                    );
                 }
             }
         }
@@ -194,6 +207,7 @@ pub fn run(target: &str, cycles: u32, stop: Arc<AtomicBool>) {
         log(BAD, format!("{target}: не резолвится"));
         return;
     };
+    clear_rdns();
     log(HDR, format!("MTR до {target} [{ip}] — {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S")));
     let data = Mutex::new(Data { hops: vec![HopStat::default(); MTR_MAX_HOPS + 1], ..Default::default() });
     let mut cycle = 0usize;

@@ -29,7 +29,6 @@ winreg = "0.56.0"
 opt-level = "s"
 lto = true
 codegen-units = 1
-panic = "abort"
 strip = true
 
 [target."cfg(windows)".build-dependencies]

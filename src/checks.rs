@@ -60,6 +60,9 @@ fn check_link() {
     st().link = Some(l.clone());
     if l.rx_mbps <= 0.0 && l.tx_mbps <= 0.0 {
         log(WARN, format!("Скорость линка {} ({}): не определена", l.kind_ru(), l.name));
+        if l.kind == "wifi" && cfg!(target_os = "linux") {
+            log("·", "Для определения скорости Wi-Fi установите пакет iw: sudo apt install iw (либо wireless-tools / NetworkManager)");
+        }
         return;
     }
     let mut s = format!("{} {:.0}/{:.0} Мбит/с (приём/передача)", l.kind_ru(), l.rx_mbps, l.tx_mbps);
@@ -401,7 +404,10 @@ fn check_doh() -> bool {
 
 pub fn check_sites() {
     log(HDR, "Доступность сайтов");
-    let cl = http(6).build().unwrap();
+    let Ok(cl) = http(6).build() else {
+        log(BAD, "Не удалось создать HTTP-клиент");
+        return;
+    };
     for u in SITES {
         let t = Instant::now();
         match cl.get(*u).send() {
@@ -458,8 +464,11 @@ fn speed(down: bool) -> f64 {
         .pool_max_idle_per_host(THREADS * 2)
         .connect_timeout(Duration::from_secs(5))
         .user_agent("Mozilla/5.0")
-        .build()
-        .unwrap();
+        .build();
+    let Ok(client) = client else {
+        log(BAD, "Не удалось создать HTTP-клиент для замера скорости");
+        return 0.0;
+    };
     let end = Instant::now() + Duration::from_secs(SPEED_SECONDS);
     let total = Arc::new(AtomicU64::new(0));
     let payload = Arc::new(if down {
@@ -546,7 +555,10 @@ pub fn check_user_sites(list: &[String]) -> Vec<String> {
         return failed;
     }
     log(HDR, "Сайты, указанные пользователем");
-    let cl = http(8).build().unwrap();
+    let Ok(cl) = http(8).build() else {
+        log(BAD, "Не удалось создать HTTP-клиент");
+        return failed;
+    };
     for raw in list {
         let u = norm_url(raw);
         let h = match reqwest::Url::parse(&u).ok().and_then(|p| p.host_str().map(String::from)) {
@@ -715,4 +727,33 @@ pub fn send_report(login: &str, note: &str) -> Result<(), String> {
         .send()
         .map_err(|e| e.to_string())?;
     if r.status().is_success() { Ok(()) } else { Err(format!("сервер ответил {}", r.status())) }
+}
+
+#[cfg(test)]
+mod repeat {
+    use crate::state::*;
+
+    /// Два теста подряд: второй не должен нести остатки первого. Долгий (нужна сеть), запуск: cargo test -- --ignored
+    #[test]
+    #[ignore]
+    fn second_run_is_clean() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let snap = || {
+            let g = st();
+            (g.report.clone(), g.summ.pings.len(), g.summ.sites.len(), g.summ.route.len())
+        };
+        reset();
+        super::run_all(vec![]);
+        let first = snap();
+        reset();
+        assert!(st().report.is_empty() && st().summ.pings.is_empty() && st().link.is_none());
+        super::run_all(vec![]);
+        let second = snap();
+        for (r, name) in [(&first.0, "1"), (&second.0, "2")] {
+            assert_eq!(r.matches("КРАТКОЕ РЕЗЮМЕ").count(), 1, "запуск {name}");
+            assert_eq!(r.matches("Готово.").count(), 1, "запуск {name}");
+            assert_eq!(r.matches("Тест ").count(), 1, "запуск {name}");
+        }
+        assert_eq!((first.1, first.2, first.3), (second.1, second.2, second.3), "списки не должны копиться");
+    }
 }

@@ -229,6 +229,21 @@ fn window_icon() -> Option<egui::IconData> {
     None
 }
 
+/// Сбрасывает флаги занятости при любом завершении потока, в том числе при панике:
+/// иначе после сбоя интерфейс навсегда остался бы в состоянии «идёт проверка».
+struct Done {
+    flag: Arc<AtomicBool>,
+    can_send: Arc<AtomicBool>,
+}
+
+impl Drop for Done {
+    fn drop(&mut self) {
+        self.can_send.store(true, Relaxed);
+        self.flag.store(false, Relaxed);
+        set_live(String::new());
+    }
+}
+
 struct App {
     login: String,
     extra: String,
@@ -284,10 +299,8 @@ impl App {
         self.busy.store(true, Relaxed);
         let (busy, can) = (self.busy.clone(), self.can_send.clone());
         std::thread::spawn(move || {
+            let _done = Done { flag: busy, can_send: can };
             checks::run_all(list);
-            can.store(true, Relaxed);
-            busy.store(false, Relaxed);
-            set_live(String::new());
         });
     }
 
@@ -300,6 +313,13 @@ impl App {
         let (note, sending) = (self.note.clone(), self.sending.clone());
         sending.store(true, Relaxed);
         std::thread::spawn(move || {
+            struct Off(Arc<AtomicBool>);
+            impl Drop for Off {
+                fn drop(&mut self) {
+                    self.0.store(false, Relaxed);
+                }
+            }
+            let _off = Off(sending.clone());
             match checks::send_report(&login, &note) {
                 Ok(()) => logf!(OK, "Отчёт отправлен"),
                 Err(e) => logf!(BAD, "Отправка не удалась: {e}"),
@@ -325,6 +345,7 @@ impl App {
         self.mtr_run.store(true, Relaxed);
         let (run, stop, can) = (self.mtr_run.clone(), self.mtr_stop.clone(), self.can_send.clone());
         std::thread::spawn(move || {
+            let _done = Done { flag: run, can_send: can };
             let need_ip = {
                 let g = st();
                 g.ip4.is_empty() && g.ip6.is_empty()
@@ -333,8 +354,6 @@ impl App {
                 checks::detect_ip();
             }
             mtr::run(&host, n, stop);
-            can.store(true, Relaxed);
-            run.store(false, Relaxed);
         });
     }
 }
@@ -709,4 +728,23 @@ fn main() -> eframe::Result<()> {
     }
     let opts = eframe::NativeOptions { viewport: vp, ..Default::default() };
     eframe::run_native("ispcheck", opts, Box::new(|cc| Ok(Box::new(App::new(cc)))))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Паника в потоке проверки не должна оставлять интерфейс в состоянии «идёт проверка».
+    #[test]
+    fn flags_reset_after_panic() {
+        let (busy, can) = (Arc::new(AtomicBool::new(true)), Arc::new(AtomicBool::new(false)));
+        let (b, c) = (busy.clone(), can.clone());
+        let r = std::thread::spawn(move || {
+            let _done = Done { flag: b, can_send: c };
+            panic!("сбой проверки");
+        })
+        .join();
+        assert!(r.is_err());
+        assert!(!busy.load(Relaxed) && can.load(Relaxed));
+    }
 }

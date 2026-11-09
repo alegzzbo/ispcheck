@@ -77,6 +77,17 @@ pub fn icmp_echo(ip: Ipv4Addr, ttl: u8, timeout: Duration) -> Result<Echo, Strin
     }
 }
 
+/// Путь к утилите: в Debian/MX Linux `iw` лежит в /usr/sbin, которого нет в PATH обычного пользователя.
+fn tool(name: &str) -> String {
+    for d in ["/usr/sbin", "/sbin", "/usr/bin", "/bin", "/usr/local/bin"] {
+        let p = format!("{d}/{name}");
+        if std::path::Path::new(&p).exists() {
+            return p;
+        }
+    }
+    name.to_string()
+}
+
 fn cmd(c: &str, args: &[&str]) -> String {
     Command::new(c)
         .args(args)
@@ -139,7 +150,7 @@ pub fn connection_type() -> String {
         return "неизвестно".into();
     }
     if cfg!(target_os = "linux") {
-        if std::path::Path::new(&format!("/sys/class/net/{i}/wireless")).exists() {
+        if is_wireless(&i) {
             return format!("Wi-Fi ({i})");
         }
         if std::fs::read_to_string(format!("/sys/class/net/{i}/type")).map_or(false, |t| t.trim() == "1") {
@@ -246,7 +257,147 @@ fn num_before(s: &str, key: &str) -> Option<f64> {
     })
 }
 
-/// Linux: /sys/class/net и `iw` (если установлен); macOS: CoreWLAN (Wi-Fi) и ifconfig (Ethernet).
+/// Данные Wi-Fi из разных источников (iw, iwconfig, nmcli).
+#[derive(Default, Debug, PartialEq)]
+struct Wifi {
+    ssid: String,
+    dbm: Option<i32>,
+    pct: Option<u32>,
+    freq: u32,
+    rx: f64,
+    tx: f64,
+}
+
+impl Wifi {
+    /// Дополняет пустые поля данными из другого источника.
+    fn fill(&mut self, o: Wifi) {
+        if self.ssid.is_empty() {
+            self.ssid = o.ssid;
+        }
+        self.dbm = self.dbm.or(o.dbm);
+        self.pct = self.pct.or(o.pct);
+        if self.freq == 0 {
+            self.freq = o.freq;
+        }
+        if self.rx <= 0.0 {
+            self.rx = o.rx;
+        }
+        if self.tx <= 0.0 {
+            self.tx = o.tx;
+        }
+    }
+}
+
+/// `iw dev <if> link`
+fn parse_iw_link(o: &str) -> Wifi {
+    let mut w = Wifi::default();
+    for ln in o.lines() {
+        if let Some(v) = ln.trim().strip_prefix("SSID:") {
+            w.ssid = v.trim().to_string();
+        }
+    }
+    w.dbm = num_before(o, "signal:").map(|v| v as i32);
+    w.freq = num_before(o, "freq:").unwrap_or(0.0) as u32;
+    w.rx = num_before(o, "rx bitrate:").unwrap_or(0.0);
+    w.tx = num_before(o, "tx bitrate:").unwrap_or(0.0);
+    w
+}
+
+/// `iwconfig <if>`: «Bit Rate=866.7 Mb/s», «Frequency:5.18 GHz», «Signal level=-50 dBm», ESSID:"имя"
+fn parse_iwconfig(o: &str) -> Wifi {
+    let after = |key: &str| -> Option<String> {
+        let p = o.find(key)? + key.len();
+        Some(o[p..].trim_start().split(|c: char| c.is_whitespace()).next()?.to_string())
+    };
+    let mut w = Wifi::default();
+    if let Some(p) = o.find("ESSID:\"") {
+        let r = &o[p + 7..];
+        w.ssid = r.split('"').next().unwrap_or("").to_string();
+    }
+    if let Some(v) = after("Bit Rate=").or_else(|| after("Bit Rate:")) {
+        w.rx = v.parse().unwrap_or(0.0);
+        // единицы: Mb/s, Gb/s, kb/s
+        let tail = o[o.find("Bit Rate").unwrap_or(0)..].lines().next().unwrap_or("");
+        if tail.contains("Gb/s") {
+            w.rx *= 1000.0;
+        } else if tail.contains("kb/s") {
+            w.rx /= 1000.0;
+        }
+        w.tx = w.rx;
+    }
+    if let Some(v) = after("Frequency:").or_else(|| after("Frequency=")) {
+        if let Ok(g) = v.parse::<f64>() {
+            w.freq = (g * 1000.0).round() as u32; // ГГц -> МГц
+        }
+    }
+    if let Some(v) = after("Signal level=").or_else(|| after("Signal level:")) {
+        w.dbm = v.parse().ok();
+    }
+    w
+}
+
+/// `nmcli -t -f ACTIVE,SSID,FREQ,RATE,SIGNAL dev wifi list`: строка «yes:Имя:5180 MHz:540 Mbit/s:80»
+fn parse_nmcli(o: &str) -> Wifi {
+    for l in o.lines() {
+        // SSID может содержать экранированные двоеточия (\:), поэтому поля берём с конца
+        let parts: Vec<&str> = l.rsplitn(4, ':').collect(); // SIGNAL, RATE, FREQ, "yes:SSID"
+        if parts.len() != 4 {
+            continue;
+        }
+        let Some((active, ssid)) = parts[3].split_once(':') else { continue };
+        if active != "yes" {
+            continue;
+        }
+        let num = |s: &str| s.split_whitespace().next().and_then(|x| x.parse::<f64>().ok()).unwrap_or(0.0);
+        let rate = num(parts[1]);
+        return Wifi {
+            ssid: ssid.replace("\\:", ":"),
+            dbm: None,
+            pct: parts[0].trim().parse().ok(),
+            freq: num(parts[2]) as u32,
+            rx: rate,
+            tx: rate,
+        };
+    }
+    Wifi::default()
+}
+
+fn is_wireless(i: &str) -> bool {
+    ["wireless", "phy80211"].iter().any(|d| std::path::Path::new(&format!("/sys/class/net/{i}/{d}")).exists())
+}
+
+fn linux_wifi(i: &str) -> Wifi {
+    let mut w = parse_iw_link(&cmd(&tool("iw"), &["dev", i, "link"]));
+    if w.rx <= 0.0 || w.tx <= 0.0 || w.ssid.is_empty() || w.freq == 0 {
+        w.fill(parse_iwconfig(&cmd(&tool("iwconfig"), &[i])));
+    }
+    if w.rx <= 0.0 && w.tx <= 0.0 {
+        w.fill(parse_nmcli(&cmd("nmcli", &["-t", "-f", "ACTIVE,SSID,FREQ,RATE,SIGNAL", "dev", "wifi", "list", "ifname", i])));
+    }
+    // уровень сигнала из ядра: /proc/net/wireless (колонка level, дБм)
+    if w.dbm.is_none() {
+        for l in std::fs::read_to_string("/proc/net/wireless").unwrap_or_default().lines() {
+            if let Some(r) = l.trim().strip_prefix(&format!("{i}:")) {
+                let f: Vec<&str> = r.split_whitespace().collect();
+                if let Some(v) = f.get(2).and_then(|x| x.trim_end_matches('.').parse::<f64>().ok()) {
+                    if v < 0.0 {
+                        w.dbm = Some(v as i32);
+                    }
+                }
+            }
+        }
+    }
+    // многие драйверы отдают только одно из направлений
+    if w.rx <= 0.0 {
+        w.rx = w.tx;
+    }
+    if w.tx <= 0.0 {
+        w.tx = w.rx;
+    }
+    w
+}
+
+/// Linux: /sys/class/net, iw / iwconfig / nmcli; macOS: CoreWLAN (Wi-Fi) и ifconfig (Ethernet).
 pub fn link_info() -> Option<super::Link> {
     let i = default_iface();
     if i.is_empty() {
@@ -254,21 +405,15 @@ pub fn link_info() -> Option<super::Link> {
     }
     let mut l = super::Link { name: i.clone(), kind: "other".into(), ..Default::default() };
     if cfg!(target_os = "linux") {
-        let wifi = std::path::Path::new(&format!("/sys/class/net/{i}/wireless")).exists();
-        if wifi {
+        if is_wireless(&i) {
             l.kind = "wifi".into();
-            let o = cmd("iw", &["dev", &i, "link"]);
-            for ln in o.lines() {
-                if let Some(v) = ln.trim().strip_prefix("SSID:") {
-                    l.ssid = v.trim().to_string();
-                }
-            }
-            l.signal_dbm = num_before(&o, "signal:").map(|v| v as i32);
-            if let Some(f) = num_before(&o, "freq:") {
-                l.set_freq(f as u32);
-            }
-            l.rx_mbps = num_before(&o, "rx bitrate:").unwrap_or(0.0);
-            l.tx_mbps = num_before(&o, "tx bitrate:").unwrap_or(0.0);
+            let w = linux_wifi(&i);
+            l.ssid = w.ssid;
+            l.signal_dbm = w.dbm;
+            l.signal_pct = w.pct;
+            l.rx_mbps = w.rx;
+            l.tx_mbps = w.tx;
+            l.set_freq(w.freq);
         } else {
             l.kind = "ethernet".into();
             let sp: f64 = std::fs::read_to_string(format!("/sys/class/net/{i}/speed"))
@@ -316,6 +461,29 @@ pub fn link_info() -> Option<super::Link> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn wifi_parsers() {
+        let iw = "Connected to 4c:ed:fb:00:00:00 (on wlp2s0)\n\tSSID: My Net\n\tfreq: 5180\n\tsignal: -52 dBm\n\trx bitrate: 866.7 MBit/s VHT-MCS 9 80MHz short GI VHT-NSS 2\n\ttx bitrate: 780.0 MBit/s VHT-MCS 8\n";
+        let w = parse_iw_link(iw);
+        assert_eq!((w.ssid.as_str(), w.dbm, w.freq, w.rx, w.tx), ("My Net", Some(-52), 5180, 866.7, 780.0));
+        assert_eq!(parse_iw_link("Not connected.\n"), Wifi::default());
+
+        let wc = "wlan0     IEEE 802.11  ESSID:\"HomeNet\"  \n          Mode:Managed  Frequency:2.437 GHz  Access Point: AA:BB:CC:DD:EE:FF   \n          Bit Rate=72.2 Mb/s   Tx-Power=20 dBm   \n          Link Quality=60/70  Signal level=-50 dBm\n";
+        let w = parse_iwconfig(wc);
+        assert_eq!((w.ssid.as_str(), w.dbm, w.freq, w.rx), ("HomeNet", Some(-50), 2437, 72.2));
+
+        let nm = "no:Other:2412 MHz:54 Mbit/s:40\nyes:Cafe\\:Guest:5180 MHz:540 Mbit/s:80\n";
+        let w = parse_nmcli(nm);
+        assert_eq!((w.ssid.as_str(), w.pct, w.freq, w.rx), ("Cafe:Guest", Some(80), 5180, 540.0));
+
+        // недостающее добирается из другого источника
+        let mut a = parse_iw_link("\tSSID: X\n\tsignal: -60 dBm\n");
+        a.fill(parse_iwconfig("Bit Rate=300 Mb/s  Frequency:5.18 GHz"));
+        assert_eq!((a.rx, a.freq, a.ssid.as_str()), (300.0, 5180, "X"));
+    }
+
     use super::parse_scutil_proxy;
 
     #[test]
