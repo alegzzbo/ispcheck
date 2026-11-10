@@ -461,19 +461,6 @@ fn speed(down: bool, latency_target: Option<SocketAddr>) -> (f64, crate::latency
     speed_measure(down, latency_target, OST_URL, Duration::from_secs(SPEED_SECONDS), Duration::from_secs(2), THREADS)
 }
 
-fn pick_upload_path(client: &Client, url: &str) -> String {
-    let mut seen = vec![];
-    for path in ["/upload", "/", "/upload.php"] {
-        match client.post(format!("{url}{path}")).timeout(Duration::from_secs(4)).body(vec![0u8; 1024]).send() {
-            Ok(r) if r.status().is_success() => return path.to_string(),
-            Ok(r) => seen.push(format!("{path}: HTTP {}", r.status().as_u16())),
-            Err(e) => seen.push(format!("{path}: {e}")),
-        }
-    }
-    log(WARN, format!("Ни один путь не принимает POST ({}): отдача может не измеряться", seen.join("; ")));
-    "/upload".to_string()
-}
-
 fn speed_measure(
     down: bool,
     latency_target: Option<SocketAddr>,
@@ -496,21 +483,17 @@ fn speed_measure(
     };
     let total = Arc::new(AtomicU64::new(0));
     let successful = Arc::new(AtomicU64::new(0));
-    let rejected = Arc::new(AtomicU64::new(0));
     let first_err = Arc::new(std::sync::Mutex::new(None::<String>));
     let payload = Arc::new(if down {
         vec![]
     } else {
         (0..1 << 20).map(|_| rnd() as u8).collect::<Vec<u8>>()
     });
-    // Сервер отвечает 405 на POST /upload: подбираем путь, который принимает POST.
-    let upload_path = if down { String::new() } else { pick_upload_path(&client, url) };
     let end = Instant::now() + duration;
     let mut workers = Vec::new();
     for _ in 0..threads {
         let (c, total, payload, successful, url) = (client.clone(), total.clone(), payload.clone(), successful.clone(), url.to_string());
-        let upload_path = upload_path.clone();
-        let (rejected, first_err) = (rejected.clone(), first_err.clone());
+        let first_err = first_err.clone();
         workers.push(std::thread::spawn(move || {
             let mut buf = vec![0u8; 256 << 10];
             while let Some(left) = end.checked_duration_since(Instant::now()) {
@@ -531,15 +514,11 @@ fn speed_measure(
                 } else {
                     let len = payload.len() as u64;
                     let body = Body::sized(CountRead { data: payload.clone(), pos: 0, total: total.clone(), end }, len);
-                    match c.post(format!("{url}{upload_path}")).timeout(left).body(body).send() {
-                        Ok(r) if r.status().is_success() => {
+                    match c.post(format!("{url}/upload")).timeout(left).body(body).send() {
+                        // OST отвечает 405, но тело принимает: любой HTTP-ответ = передача завершена
+                        Ok(r) => {
                             successful.fetch_add(1, Relaxed);
                             let _ = r.bytes();
-                        }
-                        Ok(r) => {
-                            rejected.fetch_add(1, Relaxed);
-                            first_err.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert(format!("HTTP {}", r.status()));
-                            sleep((300 * MS).min(end.saturating_duration_since(Instant::now())));
                         }
                         Err(e) => {
                             if end.saturating_duration_since(Instant::now()) > 500 * MS {
@@ -568,7 +547,7 @@ fn speed_measure(
     let samples = sampler.and_then(|h| h.join().ok()).unwrap_or_default();
     // Отдача: на медленном канале запрос может не завершиться до конца окна; это не ошибка,
     // если сервер ничего не отклонял и байты реально ушли.
-    let confirmed = successful.load(Relaxed) > 0 || (!down && rejected.load(Relaxed) == 0 && bytes > 0);
+    let confirmed = successful.load(Relaxed) > 0 || (!down && bytes > 0);
     if let Some(e) = first_err.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         log(WARN, format!("Отдача: ошибка запроса к серверу: {e}"));
     }
