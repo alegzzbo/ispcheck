@@ -488,8 +488,9 @@ fn speed_measure(
     } else {
         (0..8 << 20).map(|_| rnd() as u8).collect::<Vec<u8>>()
     });
+    let end = Instant::now() + duration;
     let mut workers = Vec::new();
-    for _ in 0..THREADS {
+    for _ in 0..threads {
         let (c, total, payload, successful) = (client.clone(), total.clone(), payload.clone(), successful.clone());
         workers.push(std::thread::spawn(move || {
             let mut buf = vec![0u8; 256 << 10];
@@ -523,7 +524,7 @@ fn speed_measure(
         }));
     }
     // Исключаем TCP slow start и измеряем задержку только в оставшемся окне нагрузки.
-    sleep(Duration::from_secs(2).min(end.saturating_duration_since(Instant::now())));
+    sleep(warmup.min(end.saturating_duration_since(Instant::now())));
     let (base, t0) = (total.load(Relaxed), Instant::now());
     let sampler = latency_target.map(|target| std::thread::spawn(move || crate::latency::under_load(target, end)));
     sleep(end.saturating_duration_since(Instant::now()));
