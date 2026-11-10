@@ -463,6 +463,17 @@ pub fn link_info() -> Option<super::Link> {
 mod tests {
     use super::*;
 
+    /// Реальный вывод `/usr/sbin/iw dev wlan0 link` с MX Linux (ThinkPad, 5 ГГц)
+    #[test]
+    fn mx_linux_real_output() {
+        let o = "Connected to 32:07:5c:d4:53:2a (on wlan0)\n\tSSID: alegzznet_5G\n\tfreq: 5180.0\n\tRX: 1083803166 bytes (789055 packets)\n\tTX: 1010667729 bytes (1408800 packets)\n\tsignal: -44 dBm\n\trx bitrate: 260.0 MBit/s VHT-MCS 3 80MHz short GI VHT-NSS 2\n\ttx bitrate: 866.7 MBit/s VHT-MCS 9 80MHz short GI VHT-NSS 2\n\tbss flags: short-slot-time\n\tdtim period: 2\n\tbeacon int: 100\n";
+        let w = parse_iw_link(o);
+        assert_eq!((w.ssid.as_str(), w.dbm, w.freq, w.rx, w.tx), ("alegzznet_5G", Some(-44), 5180, 260.0, 866.7));
+        let mut l = crate::sys::Link::default();
+        l.set_freq(w.freq);
+        assert_eq!(l.band_text(), "5 ГГц, канал 36");
+    }
+
     #[test]
     fn wifi_parsers() {
         let iw = "Connected to 4c:ed:fb:00:00:00 (on wlp2s0)\n\tSSID: My Net\n\tfreq: 5180\n\tsignal: -52 dBm\n\trx bitrate: 866.7 MBit/s VHT-MCS 9 80MHz short GI VHT-NSS 2\n\ttx bitrate: 780.0 MBit/s VHT-MCS 8\n";
