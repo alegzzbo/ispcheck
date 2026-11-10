@@ -22,6 +22,8 @@ pub struct Summ {
     pub link: String,
     pub down: f64,
     pub up: f64,
+    pub portal: String,
+    pub loaded_latency: Vec<String>,
     pub pings: Vec<String>,
     pub sites: Vec<String>,
     pub route: Vec<String>,

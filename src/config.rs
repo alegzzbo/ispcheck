@@ -4,6 +4,8 @@ pub const OST_URL: &str = "https://speedtest.point.online"; // OpenSpeedTest, б
 pub const SPEED_SECONDS: u64 = 12; // длительность каждого замера
 pub const THREADS: usize = 8; // параллельных потоков
 pub const ENABLE_IPV6: bool = false;
+// TCP handshake до одного и того же адреса в покое и под нагрузкой; без DNS.
+pub const LATENCY_TARGETS: &[&str] = &["1.1.1.1:443", "8.8.8.8:443"];
 
 pub const MTR_CYCLES: u32 = 20;
 pub const MTR_MAX_HOPS: usize = 30;

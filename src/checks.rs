@@ -457,67 +457,92 @@ impl Read for CountRead {
 }
 
 /// HTTP/1.1, по одному TCP на поток: HTTP/2 мультиплексировал бы все потоки в одно соединение.
-fn speed(down: bool) -> f64 {
+fn speed(down: bool, latency_target: Option<SocketAddr>) -> (f64, crate::latency::Samples) {
+    speed_measure(down, latency_target, OST_URL, Duration::from_secs(SPEED_SECONDS), Duration::from_secs(2), THREADS)
+}
+
+fn speed_measure(
+    down: bool,
+    latency_target: Option<SocketAddr>,
+    url: &str,
+    duration: Duration,
+    warmup: Duration,
+    threads: usize,
+) -> (f64, crate::latency::Samples) {
     let client = Client::builder()
         .no_proxy()
         .http1_only()
-        .pool_max_idle_per_host(THREADS * 2)
+        .pool_max_idle_per_host(threads * 2)
         .connect_timeout(Duration::from_secs(5))
+        .timeout(duration.max(MS))
         .user_agent("Mozilla/5.0")
         .build();
     let Ok(client) = client else {
         log(BAD, "Не удалось создать HTTP-клиент для замера скорости");
-        return 0.0;
+        return (0.0, Default::default());
     };
-    let end = Instant::now() + Duration::from_secs(SPEED_SECONDS);
     let total = Arc::new(AtomicU64::new(0));
+    let successful = Arc::new(AtomicU64::new(0));
     let payload = Arc::new(if down {
         vec![]
     } else {
         (0..8 << 20).map(|_| rnd() as u8).collect::<Vec<u8>>()
     });
+    let mut workers = Vec::new();
     for _ in 0..THREADS {
-        let (c, total, payload) = (client.clone(), total.clone(), payload.clone());
-        std::thread::spawn(move || {
+        let (c, total, payload, successful) = (client.clone(), total.clone(), payload.clone(), successful.clone());
+        workers.push(std::thread::spawn(move || {
             let mut buf = vec![0u8; 256 << 10];
-            while Instant::now() < end {
+            while let Some(left) = end.checked_duration_since(Instant::now()) {
+                if left < MS { break; }
                 if down {
-                    match c.get(format!("{OST_URL}/downloading?n={}", rnd())).send() {
-                        Ok(mut r) => {
+                    match c.get(format!("{OST_URL}/downloading?n={}", rnd())).timeout(left).send() {
+                        Ok(mut r) if r.status().is_success() => {
+                            successful.fetch_add(1, Relaxed);
                             while Instant::now() < end {
                                 match r.read(&mut buf) {
                                     Ok(0) | Err(_) => break,
-                                    Ok(n) => {
-                                        total.fetch_add(n as u64, Relaxed);
-                                    }
+                                    Ok(n) => { total.fetch_add(n as u64, Relaxed); }
                                 }
                             }
                         }
-                        Err(_) => sleep(300 * MS),
+                        _ => sleep((300 * MS).min(end.saturating_duration_since(Instant::now()))),
                     }
                 } else {
                     let len = payload.len() as u64;
                     let body = Body::sized(CountRead { data: payload.clone(), pos: 0, total: total.clone(), end }, len);
-                    match c.post(format!("{OST_URL}/upload")).body(body).send() {
-                        Ok(r) => {
+                    match c.post(format!("{OST_URL}/upload")).timeout(left).body(body).send() {
+                        Ok(r) if r.status().is_success() => {
+                            successful.fetch_add(1, Relaxed);
                             let _ = r.bytes();
                         }
-                        Err(_) => {
-                            if Instant::now() < end {
-                                sleep(300 * MS)
-                            }
-                        }
+                        _ => sleep((300 * MS).min(end.saturating_duration_since(Instant::now()))),
                     }
                 }
             }
-        });
+        }));
     }
-    // первые 2 с (TCP slow start) не учитываем, как и браузерный тест
-    sleep(Duration::from_secs(2));
+    // Исключаем TCP slow start и измеряем задержку только в оставшемся окне нагрузки.
+    sleep(Duration::from_secs(2).min(end.saturating_duration_since(Instant::now())));
     let (base, t0) = (total.load(Relaxed), Instant::now());
+    let sampler = latency_target.map(|target| std::thread::spawn(move || crate::latency::under_load(target, end)));
     sleep(end.saturating_duration_since(Instant::now()));
     let bytes = total.load(Relaxed).saturating_sub(base);
-    bytes as f64 * 8.0 / t0.elapsed().as_secs_f64() / 1e6
+    let elapsed = t0.elapsed().as_secs_f64();
+    // Не оставляем трафик предыдущего направления в следующем замере.
+    for worker in workers {
+        if worker.join().is_err() {
+            log(WARN, "Один из потоков замера скорости завершился с ошибкой");
+        }
+    }
+    let samples = sampler.and_then(|h| h.join().ok()).unwrap_or_default();
+    let value = if successful.load(Relaxed) > 0 && elapsed > 0.0 {
+        bytes as f64 * 8.0 / elapsed / 1e6
+    } else {
+        log(BAD, "Сервер не подтвердил успешные передачи: замер скорости недействителен");
+        0.0
+    };
+    (value, samples)
 }
 
 pub fn check_speed() {
@@ -526,15 +551,45 @@ pub fn check_speed() {
         log(BAD, format!("{OST_URL} недоступен ({e}): замер скорости пропущен"));
         return;
     }
+    log(HDR, "Задержка под нагрузкой (bufferbloat)");
+    log("·", "Сравнивается время TCP-подключения к одному адресу в покое и во время замера скорости; это не ICMP-пинг.");
+    let mut latency = None;
+    for address in LATENCY_TARGETS {
+        let Ok(target) = address.parse::<SocketAddr>() else { continue };
+        let idle = crate::latency::baseline(target);
+        if idle.rtts.len() >= 3 {
+            log(if idle.loss() > 0.0 { WARN } else { OK }, format!(
+                "В покое [{target}, TCP]: {:.1} мс, ответов {}/{}, без ответа {:.0}%",
+                idle.mean().unwrap_or_default(), idle.rtts.len(), idle.sent, idle.loss()
+            ));
+            latency = Some((target, idle));
+            break;
+        }
+    }
+    if latency.is_none() {
+        let reason = "не удалось получить достаточно ответов в покое; оценка bufferbloat пропущена";
+        log(WARN, reason);
+        st().summ.loaded_latency.push(reason.into());
+    }
     let link = st().link.clone();
     for (name, down) in [("Загрузка", true), ("Отдача", false)] {
-        let v = speed(down);
+        let (v, loaded) = speed(down, latency.as_ref().map(|(target, _)| *target));
         if down {
             st().summ.down = v;
         } else {
             st().summ.up = v;
         }
         log(if v < 1.0 { BAD } else { OK }, format!("{name}: {v:.1} Мбит/с"));
+        if let Some((target, idle)) = &latency {
+            let (warn, detail) = if v > 0.0 {
+                crate::latency::describe(idle, &loaded)
+            } else {
+                (true, "замер скорости не создал подтверждённую нагрузку; оценка bufferbloat недоступна".into())
+            };
+            let summary = format!("{name} [{target}, TCP]: {detail}");
+            log(if warn { WARN } else { OK }, &summary);
+            st().summ.loaded_latency.push(summary);
+        }
         if let Some(l) = &link {
             let lim = if down { l.rx_mbps } else { l.tx_mbps };
             if lim > 0.0 && v > lim * 0.8 {
@@ -649,6 +704,10 @@ pub fn log_summary() {
     p("DNS", &s.dns);
     p("Upstream-DNS", &s.dns_up);
     p("Шлюз", &s.gw);
+    p("Captive portal", &s.portal);
+    for result in &s.loaded_latency {
+        p("Задержка под нагрузкой", result);
+    }
     for v in &s.pings {
         log("·", format!("Пинг {v}"));
     }
@@ -673,6 +732,9 @@ pub fn run_all(list: Vec<String>) {
     log(HDR, format!("Тест {ISP_NAME} — {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S")));
     check_connection_info();
     let gw_ok = check_gateway();
+    // HTTP-перехват проверяем и при недоступном TCP/443: портал может блокировать HTTPS.
+    let portal = crate::portal::check();
+    st().summ.portal = portal;
     let online = internet_reachable();
     if !online {
         if !gw_ok {

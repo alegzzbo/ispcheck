@@ -7,6 +7,8 @@ macro_rules! logf {
 mod checks;
 mod config;
 mod dns;
+mod latency;
+mod portal;
 mod mtr;
 mod state;
 mod sys;
