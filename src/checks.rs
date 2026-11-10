@@ -491,13 +491,13 @@ fn speed_measure(
     let end = Instant::now() + duration;
     let mut workers = Vec::new();
     for _ in 0..threads {
-        let (c, total, payload, successful) = (client.clone(), total.clone(), payload.clone(), successful.clone());
+        let (c, total, payload, successful, url) = (client.clone(), total.clone(), payload.clone(), successful.clone(), url.to_string());
         workers.push(std::thread::spawn(move || {
             let mut buf = vec![0u8; 256 << 10];
             while let Some(left) = end.checked_duration_since(Instant::now()) {
                 if left < MS { break; }
                 if down {
-                    match c.get(format!("{OST_URL}/downloading?n={}", rnd())).timeout(left).send() {
+                    match c.get(format!("{url}/downloading?n={}", rnd())).timeout(left).send() {
                         Ok(mut r) if r.status().is_success() => {
                             successful.fetch_add(1, Relaxed);
                             while Instant::now() < end {
@@ -512,7 +512,7 @@ fn speed_measure(
                 } else {
                     let len = payload.len() as u64;
                     let body = Body::sized(CountRead { data: payload.clone(), pos: 0, total: total.clone(), end }, len);
-                    match c.post(format!("{OST_URL}/upload")).timeout(left).body(body).send() {
+                    match c.post(format!("{url}/upload")).timeout(left).body(body).send() {
                         Ok(r) if r.status().is_success() => {
                             successful.fetch_add(1, Relaxed);
                             let _ = r.bytes();

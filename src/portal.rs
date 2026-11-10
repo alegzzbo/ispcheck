@@ -176,6 +176,10 @@ mod tests {
         assert_eq!(verdict(&[]), Verdict::Inconclusive);
     }
 
+    fn init_tls() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+
     fn read_request(stream: &mut std::net::TcpStream) -> String {
         stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
         let mut request = Vec::new();
@@ -189,6 +193,7 @@ mod tests {
 
     #[test]
     fn loopback_status_headers_and_no_redirect_following() {
+        init_tls();
         let client = client(TIMEOUT).unwrap();
         for status in [204, 200, 302, 511, 403, 503] {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -214,6 +219,7 @@ mod tests {
 
     #[test]
     fn loopback_timeout_is_inconclusive() {
+        init_tls();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/generate_204", listener.local_addr().unwrap());
         let (release, wait) = mpsc::channel::<()>();
