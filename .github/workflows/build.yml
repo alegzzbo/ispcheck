@@ -22,7 +22,7 @@ env:
   PROFILE: release
 
 jobs:
-  # Тесты идут параллельно со сборками, в debug-профиле (не компилируют проект второй раз с LTO)
+  # Тесты идут параллельно со сборками, в debug-профиле
   test:
     runs-on: ubuntu-22.04
     steps:
@@ -33,13 +33,14 @@ jobs:
           key: test
       - run: cargo test
 
+  # Сборка под Windows и Linux
   build:
     strategy:
       fail-fast: false
       matrix:
         include:
           - { os: windows-latest, target: x86_64-pc-windows-msvc, bin: ispcheck.exe, out: ispcheck-windows-amd64.exe }
-          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, bin: ispcheck, out: ispcheck-linux-amd64 } # старый glibc
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, bin: ispcheck, out: ispcheck-linux-amd64 }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -52,7 +53,7 @@ jobs:
         with:
           key: ${{ matrix.target }}-${{ env.PROFILE }}
 
-      # Тег vX.Y.Z -> версия в Cargo.toml (показывается в окне и проверяется автообновлением)
+      # Тег vX.Y.Z -> версия в Cargo.toml
       - name: Version from tag
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
@@ -61,7 +62,6 @@ jobs:
       - name: Build
         shell: bash
         env:
-          # Windows: статическая CRT, чтобы не требовался VC++ Redistributable
           RUSTFLAGS: ${{ runner.os == 'Windows' && '-C target-feature=+crt-static' || '' }}
         run: |
           cargo build --profile "$PROFILE" --target "${{ matrix.target }}"
@@ -77,69 +77,6 @@ jobs:
         with:
           name: ${{ matrix.out }}
           path: |
-            ${{ matrix.out }}
-            ${{ matrix.out }}.sha256
+            ${{ matrix.out }}${{ matrix.out }}.sha256
           if-no-files-found: error
-          retention-days: 14
-
-  build-macos-on-linux:
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin, x86_64-apple-darwin
-
-      - name: Install Zig and LLVM tools
-        run: |
-          pip install cargo-zigbuild
-          sudo apt-get update && sudo apt-get install -y llvm
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: macos-zigbuild-${{ env.PROFILE }}
-
-      - name: Version from tag
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: bash
-        run: perl -0pi -e 's/^version = ".*?"/version = "${GITHUB_REF_NAME#v}"/m' Cargo.toml
-
-      - name: Compile macOS targets with Zig
-        run: |
-          cargo zigbuild --profile "$PROFILE" --target aarch64-apple-darwin
-          cargo zigbuild --profile "$PROFILE" --target x86_64-apple-darwin
-
-      - name: Create Universal Binary
-        run: |
-          llvm-lipo -create -output ispcheck-macos-universal \
-            "target/aarch64-apple-darwin/$PROFILE/ispcheck" \
-            "target/x86_64-apple-darwin/$PROFILE/ispcheck"
-          chmod +x ispcheck-macos-universal
-          sha256sum ispcheck-macos-universal > ispcheck-macos-universal.sha256
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ispcheck-macos-universal
-          path: |
-            ispcheck-macos-universal
-            ispcheck-macos-universal.sha256
-          if-no-files-found: error
-          retention-days: 14
-
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [test, build, build-macos-on-linux]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-          pattern: ispcheck-*
-          merge-multiple: true
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-          generate_release_notes: true
+          retention-days:
