@@ -461,6 +461,19 @@ fn speed(down: bool, latency_target: Option<SocketAddr>) -> (f64, crate::latency
     speed_measure(down, latency_target, OST_URL, Duration::from_secs(SPEED_SECONDS), Duration::from_secs(2), THREADS)
 }
 
+fn pick_upload_path(client: &Client, url: &str) -> String {
+    let mut seen = vec![];
+    for path in ["/upload", "/", "/upload.php"] {
+        match client.post(format!("{url}{path}")).timeout(Duration::from_secs(4)).body(vec![0u8; 1024]).send() {
+            Ok(r) if r.status().is_success() => return path.to_string(),
+            Ok(r) => seen.push(format!("{path}: HTTP {}", r.status().as_u16())),
+            Err(e) => seen.push(format!("{path}: {e}")),
+        }
+    }
+    log(WARN, format!("Ни один путь не принимает POST ({}): отдача может не измеряться", seen.join("; ")));
+    "/upload".to_string()
+}
+
 fn speed_measure(
     down: bool,
     latency_target: Option<SocketAddr>,
@@ -490,10 +503,13 @@ fn speed_measure(
     } else {
         (0..1 << 20).map(|_| rnd() as u8).collect::<Vec<u8>>()
     });
+    // Сервер отвечает 405 на POST /upload: подбираем путь, который принимает POST.
+    let upload_path = if down { String::new() } else { pick_upload_path(&client, url) };
     let end = Instant::now() + duration;
     let mut workers = Vec::new();
     for _ in 0..threads {
         let (c, total, payload, successful, url) = (client.clone(), total.clone(), payload.clone(), successful.clone(), url.to_string());
+        let upload_path = upload_path.clone();
         let (rejected, first_err) = (rejected.clone(), first_err.clone());
         workers.push(std::thread::spawn(move || {
             let mut buf = vec![0u8; 256 << 10];
@@ -515,7 +531,7 @@ fn speed_measure(
                 } else {
                     let len = payload.len() as u64;
                     let body = Body::sized(CountRead { data: payload.clone(), pos: 0, total: total.clone(), end }, len);
-                    match c.post(format!("{url}/upload")).timeout(left).body(body).send() {
+                    match c.post(format!("{url}{upload_path}")).timeout(left).body(body).send() {
                         Ok(r) if r.status().is_success() => {
                             successful.fetch_add(1, Relaxed);
                             let _ = r.bytes();
