@@ -22,7 +22,7 @@ env:
   PROFILE: release
 
 jobs:
-  # Тесты идут параллельно со сборками, в debug-профиле
+  # Тесты идут параллельно со сборками, в debug-профиле (не компилируют проект второй раз с LTO)
   test:
     runs-on: ubuntu-22.04
     steps:
@@ -33,14 +33,15 @@ jobs:
           key: test
       - run: cargo test
 
-  # Сборка под Windows и Linux
   build:
     strategy:
       fail-fast: false
       matrix:
         include:
           - { os: windows-latest, target: x86_64-pc-windows-msvc, bin: ispcheck.exe, out: ispcheck-windows-amd64.exe }
-          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, bin: ispcheck, out: ispcheck-linux-amd64 }
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, bin: ispcheck, out: ispcheck-linux-amd64 } # старый glibc
+          - { os: macos-latest, target: aarch64-apple-darwin, bin: ispcheck, out: tmp-macos-arm64 }
+          - { os: macos-latest, target: x86_64-apple-darwin, bin: ispcheck, out: tmp-macos-x64 }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -53,7 +54,7 @@ jobs:
         with:
           key: ${{ matrix.target }}-${{ env.PROFILE }}
 
-      # Тег vX.Y.Z -> версия в Cargo.toml
+      # Тег vX.Y.Z -> версия в Cargo.toml (показывается в окне и проверяется автообновлением)
       - name: Version from tag
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
@@ -62,12 +63,14 @@ jobs:
       - name: Build
         shell: bash
         env:
+          # Windows: статическая CRT, чтобы не требовался VC++ Redistributable
           RUSTFLAGS: ${{ runner.os == 'Windows' && '-C target-feature=+crt-static' || '' }}
         run: |
           cargo build --profile "$PROFILE" --target "${{ matrix.target }}"
           cp "target/${{ matrix.target }}/$PROFILE/${{ matrix.bin }}" "${{ matrix.out }}"
 
       - name: SHA-256
+        if: ${{ !startsWith(matrix.out, 'tmp-') }}
         shell: bash
         run: |
           if command -v sha256sum >/dev/null; then sha256sum "${{ matrix.out }}" > "${{ matrix.out }}.sha256";
@@ -77,6 +80,43 @@ jobs:
         with:
           name: ${{ matrix.out }}
           path: |
-            ${{ matrix.out }}${{ matrix.out }}.sha256
+            ${{ matrix.out }}
+            ${{ matrix.out }}.sha256
           if-no-files-found: error
-          retention-days:
+          retention-days: ${{ startsWith(matrix.out, 'tmp-') && 1 || 14 }}
+
+  # Универсальный macOS-бинарь: две архитектуры собираются параллельно, здесь только склейка
+  macos-universal:
+    needs: build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tmp-macos-*
+      - run: |
+          lipo -create -output ispcheck-macos-universal tmp-macos-arm64/tmp-macos-arm64 tmp-macos-x64/tmp-macos-x64
+          chmod +x ispcheck-macos-universal
+          shasum -a 256 ispcheck-macos-universal > ispcheck-macos-universal.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ispcheck-macos-universal
+          path: |
+            ispcheck-macos-universal
+            ispcheck-macos-universal.sha256
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, build, macos-universal]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: ispcheck-*
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
