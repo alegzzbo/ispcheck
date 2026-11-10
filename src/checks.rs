@@ -483,15 +483,18 @@ fn speed_measure(
     };
     let total = Arc::new(AtomicU64::new(0));
     let successful = Arc::new(AtomicU64::new(0));
+    let rejected = Arc::new(AtomicU64::new(0));
+    let first_err = Arc::new(std::sync::Mutex::new(None::<String>));
     let payload = Arc::new(if down {
         vec![]
     } else {
-        (0..8 << 20).map(|_| rnd() as u8).collect::<Vec<u8>>()
+        (0..1 << 20).map(|_| rnd() as u8).collect::<Vec<u8>>()
     });
     let end = Instant::now() + duration;
     let mut workers = Vec::new();
     for _ in 0..threads {
         let (c, total, payload, successful, url) = (client.clone(), total.clone(), payload.clone(), successful.clone(), url.to_string());
+        let (rejected, first_err) = (rejected.clone(), first_err.clone());
         workers.push(std::thread::spawn(move || {
             let mut buf = vec![0u8; 256 << 10];
             while let Some(left) = end.checked_duration_since(Instant::now()) {
@@ -517,7 +520,17 @@ fn speed_measure(
                             successful.fetch_add(1, Relaxed);
                             let _ = r.bytes();
                         }
-                        _ => sleep((300 * MS).min(end.saturating_duration_since(Instant::now()))),
+                        Ok(r) => {
+                            rejected.fetch_add(1, Relaxed);
+                            first_err.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert(format!("HTTP {}", r.status()));
+                            sleep((300 * MS).min(end.saturating_duration_since(Instant::now())));
+                        }
+                        Err(e) => {
+                            if end.saturating_duration_since(Instant::now()) > 500 * MS {
+                                first_err.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert(format!("{e:?}"));
+                            }
+                            sleep((300 * MS).min(end.saturating_duration_since(Instant::now())));
+                        }
                     }
                 }
             }
@@ -537,7 +550,13 @@ fn speed_measure(
         }
     }
     let samples = sampler.and_then(|h| h.join().ok()).unwrap_or_default();
-    let value = if successful.load(Relaxed) > 0 && elapsed > 0.0 {
+    // Отдача: на медленном канале запрос может не завершиться до конца окна; это не ошибка,
+    // если сервер ничего не отклонял и байты реально ушли.
+    let confirmed = successful.load(Relaxed) > 0 || (!down && rejected.load(Relaxed) == 0 && bytes > 0);
+    if let Some(e) = first_err.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        log(WARN, format!("Отдача: ошибка запроса к серверу: {e}"));
+    }
+    let value = if confirmed && elapsed > 0.0 {
         bytes as f64 * 8.0 / elapsed / 1e6
     } else {
         log(BAD, "Сервер не подтвердил успешные передачи: замер скорости недействителен");

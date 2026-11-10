@@ -121,8 +121,8 @@ fn apply_theme(ctx: &egui::Context) {
 
         // Курсор и выделение
         v.text_cursor.stroke = egui::Stroke::new(2.0, ACCENT);
-        v.selection.bg_fill = Color32::from_rgba_premultiplied(60, 110, 180, 140);
-        v.selection.stroke = egui::Stroke::new(0.0, Color32::TRANSPARENT);
+        v.selection.bg_fill = Color32::from_rgb(38, 92, 160);
+        v.selection.stroke = egui::Stroke::new(1.0, Color32::WHITE); // цвет выделенного текста
 
         v.extreme_bg_color = BG_INPUT;
 
