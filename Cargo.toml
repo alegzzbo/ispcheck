@@ -1,0 +1,52 @@
+[package]
+name = "ispcheck"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+base64 = "0.23.1"
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+ctrlc = "3.5.2"
+dns-lookup = "4.0.2"
+ed25519-dalek = { version = "3.0.0", optional = true }
+eframe = { version = "0.37.0", default-features = false, features = ["glow", "default_fonts", "x11", "wayland", "clipboard", "links"], optional = true }
+gethostname = "1.1.0"
+hex = "0.4.3"
+image = { version = "0.25.10", default-features = false, features = ["ico", "png"], optional = true }
+reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "rustls-no-provider", "http2", "socks"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = { version = "0.11.1", optional = true }
+
+[target."cfg(unix)".dependencies]
+socket2 = { version = "0.6.5", features = ["all"] }
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_NetworkManagement_WiFi", "Win32_Networking_WinSock", "Win32_System_Console"] }
+winreg = "0.56.0"
+
+# Быстрый профиль для CI (обычные пуши): без LTO и с параллельной кодогенерацией.
+# Полный [profile.release] используется только для тегов vX.Y.Z.
+[profile.ci]
+inherits = "release"
+lto = false
+codegen-units = 16
+opt-level = 2
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+
+[features]
+# Окно (egui) и автообновление. Консольная сборка: cargo build --release --no-default-features
+default = ["gui"]
+gui = ["dep:eframe", "dep:image", "dep:ed25519-dalek", "dep:sha2"]
+
+[target."cfg(windows)".build-dependencies]
+winresource = "0.1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-core-wlan = { version = "0.3", default-features = false, features = ["std", "CWWiFiClient", "CWInterface", "CWChannel", "CoreWLANTypes"] }

@@ -1,0 +1,135 @@
+name: build
+
+on:
+  push:
+    tags: ["v*"]
+  # Ручной запуск на ветке main ПРОГРЕВАЕТ КЭШ: тег-сборки читают кэш только из main,
+  # поэтому без прогрева каждая тег-сборка компилирует все зависимости с нуля.
+  # Запускайте после изменения Cargo.lock (Actions -> build -> Run workflow, ветка main).
+  workflow_dispatch:
+
+# Новый запуск отменяет незавершённый запуск той же ветки или тега
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_TERM_COLOR: always
+  PROFILE: release
+
+jobs:
+  # Тесты идут параллельно со сборками, в debug-профиле (не компилируют проект второй раз с LTO)
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: test
+      - run: cargo test
+      - run: cargo test --no-default-features
+
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, bin: ispcheck.exe, out: ispcheck-windows-amd64.exe }
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, bin: ispcheck, out: ispcheck-linux-amd64 } # старый glibc
+          # консольная версия (без окна и OpenGL): статический бинарь, работает на любом Linux, в том числе старом и без графики
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-musl, bin: ispcheck, out: ispcheck-cli-linux-amd64, args: "--no-default-features", musl: true }
+          # macos-latest сейчас = macOS 26; явная метка macos-15 (arm64), x86_64 собирается кросс-компиляцией
+          - { os: macos-15, target: aarch64-apple-darwin, bin: ispcheck, out: tmp-macos-arm64 }
+          - { os: macos-15, target: x86_64-apple-darwin, bin: ispcheck, out: tmp-macos-x64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: musl-tools
+        if: matrix.musl
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}-${{ env.PROFILE }}-${{ matrix.args }}
+
+      # Тег vX.Y.Z -> версия в Cargo.toml (показывается в окне и проверяется автообновлением)
+      - name: Version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: perl -0pi -e 's/^version = ".*?"/version = "${GITHUB_REF_NAME#v}"/m' Cargo.toml
+
+      - name: Build
+        shell: bash
+        env:
+          # Windows: статическая CRT, чтобы не требовался VC++ Redistributable
+          RUSTFLAGS: ${{ runner.os == 'Windows' && '-C target-feature=+crt-static' || '' }}
+        run: |
+          cargo build --profile "$PROFILE" --target "${{ matrix.target }}" ${{ matrix.args }}
+          cp "target/${{ matrix.target }}/$PROFILE/${{ matrix.bin }}" "${{ matrix.out }}"
+
+      - name: SHA-256
+        if: ${{ !startsWith(matrix.out, 'tmp-') }}
+        shell: bash
+        run: |
+          if command -v sha256sum >/dev/null; then sha256sum "${{ matrix.out }}" > "${{ matrix.out }}.sha256";
+          else shasum -a 256 "${{ matrix.out }}" > "${{ matrix.out }}.sha256"; fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.out }}
+          path: |
+            ${{ matrix.out }}
+            ${{ matrix.out }}.sha256
+          if-no-files-found: error
+          retention-days: ${{ startsWith(matrix.out, 'tmp-') && 1 || 14 }}
+
+  # macOS: склейка двух архитектур, упаковка в «ISP Check.app» и .dmg (двойной клик, перетаскивание в Программы)
+  macos-universal:
+    needs: build
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tmp-macos-*
+      - name: Package .app / .dmg
+        run: |
+          VERSION="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then VERSION="${GITHUB_REF_NAME#v}"; fi
+          lipo -create -output ispcheck-universal tmp-macos-arm64/tmp-macos-arm64 tmp-macos-x64/tmp-macos-x64
+          mkdir -p out
+          bash packaging/macos/package.sh ispcheck-universal "$VERSION" out
+          cd out && shasum -a 256 ispcheck-macos-universal.dmg > ispcheck-macos-universal.dmg.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ispcheck-macos-universal.dmg
+          path: |
+            out/ispcheck-macos-universal.dmg
+            out/ispcheck-macos-universal.dmg.sha256
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, build, macos-universal]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: ispcheck-*
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
