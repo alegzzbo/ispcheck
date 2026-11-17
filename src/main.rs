@@ -12,12 +12,15 @@ mod mtr;
 mod state;
 mod sys;
 
-#[cfg(not(feature = "gui"))]
+#[cfg(all(feature = "cli", not(feature = "gui")))]
 mod cli;
 #[cfg(feature = "gui")]
 mod gui;
 #[cfg(feature = "gui")]
 mod update;
+
+#[cfg(not(any(feature = "gui", feature = "cli")))]
+compile_error!("включите feature `gui` (по умолчанию) или `cli`: cargo build --no-default-features --features cli");
 
 fn main() {
     // TLS-провайдер ring (без C++/cmake/NASM)
@@ -27,6 +30,6 @@ fn main() {
         eprintln!("{e}");
         std::process::exit(1);
     }
-    #[cfg(not(feature = "gui"))]
+    #[cfg(all(feature = "cli", not(feature = "gui")))]
     cli::run();
 }

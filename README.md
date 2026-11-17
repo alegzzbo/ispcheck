@@ -33,7 +33,7 @@
 
 ## Консольная версия (без GUI)
 
-Для серверов, SSH и систем без графики есть сборка без окна и OpenGL. Это отдельный бинарь `ispcheck-cli-linux-amd64` (статический, не зависит от версии glibc) в Releases. Собрать самостоятельно: `cargo build --release --no-default-features` (под Windows и macOS тоже работает). Автообновления в консольной версии нет.
+Для серверов, SSH и систем без графики есть сборка без окна и OpenGL. Это отдельный бинарь `ispcheck-cli-linux-amd64` (статический, не зависит от версии glibc) в Releases. Собрать самостоятельно: `cargo build --release --no-default-features --features cli` (под Windows и macOS тоже работает). Автообновления в консольной версии нет.
 
 ```
 ispcheck                                  # полная проверка, журнал в консоль

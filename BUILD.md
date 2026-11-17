@@ -48,13 +48,13 @@ cargo build --release --target x86_64-pc-windows-gnu
 
 ## Консольная сборка (без GUI)
 ```
-cargo build --release --no-default-features
+cargo build --release --no-default-features --features cli
 ```
 Не требует OpenGL и графических библиотек, собирается заметно быстрее. Статический вариант для Linux:
 ```
 rustup target add x86_64-unknown-linux-musl
 sudo apt install musl-tools
-cargo build --release --no-default-features --target x86_64-unknown-linux-musl
+cargo build --release --no-default-features --features cli --target x86_64-unknown-linux-musl
 ```
 Параметры: `ispcheck --help`.
 

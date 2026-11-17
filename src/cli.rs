@@ -1,4 +1,4 @@
-//! Консольная версия (cargo build --release --no-default-features): без окна и OpenGL,
+//! Консольная версия (cargo build --release --no-default-features --features cli): без окна и OpenGL,
 //! работает по SSH и на серверах без графики.
 
 use crate::config::*;
