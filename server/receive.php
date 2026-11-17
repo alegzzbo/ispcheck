@@ -75,6 +75,7 @@ if ($login === '') {
 $ip4  = clean($d['ip4'] ?? '', 45);
 $ip6  = clean($d['ip6'] ?? '', 45);
 $ipp  = clean($d['ip_proxy'] ?? '', 45);
+$ipa  = clean($d['ip_alt'] ?? '', 45);
 $lk   = is_array($d['link'] ?? null) ? $d['link'] : [];
 $linkTxt = 'нет данных';
 if ($lk) {
@@ -97,6 +98,7 @@ $body = "Логин: $login\r\n"
       . "Комментарий клиента: $note\r\n"
       . "IP (по данным клиента): IPv4 $ip4, IPv6 $ip6\r\n"
       . "IP через прокси (по данным клиента): " . ($ipp !== '' ? $ipp : 'нет') . "\r\n"
+      . "IP по nekoip.ru (по данным клиента): " . ($ipa !== '' ? $ipa : 'нет') . ($ipa !== '' && $ip4 !== '' && $ipa !== $ip4 ? ' (ОТЛИЧАЕТСЯ: возможен split tunneling)' : '') . "\r\n"
       . "Скорость линка: $linkTxt\r\n"
       . "IP (видит сервер): $remote\r\n"
       . "ПК: $host ($os)\r\n"

@@ -18,6 +18,7 @@ pub struct Summ {
     pub dns_problem: String,
     pub ip4: String,
     pub ip_proxy: String,
+    pub ip_alt: String,
     pub ipv6: String,
     pub link: String,
     pub down: f64,
@@ -36,6 +37,7 @@ pub struct Inner {
     pub ip4: String,
     pub ip6: String,
     pub ip_proxy: String,
+    pub ip_alt: String,
     pub link: Option<crate::sys::Link>,
 }
 
@@ -181,6 +183,7 @@ pub fn reset() {
     g.ip4.clear();
     g.ip6.clear();
     g.ip_proxy.clear();
+    g.ip_alt.clear();
     g.link = None;
     BAD_COUNT.store(0, Relaxed);
 }

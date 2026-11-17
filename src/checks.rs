@@ -173,6 +173,46 @@ fn get_ip(url: &str, b: ClientBuilder) -> String {
     if s.parse::<IpAddr>().is_ok() { s } else { String::new() }
 }
 
+/// Адреса одного семейства (v4/v6) и разные.
+fn ip_differs(a: &str, b: &str) -> bool {
+    match (a.parse::<IpAddr>(), b.parse::<IpAddr>()) {
+        (Ok(x), Ok(y)) => x.is_ipv4() == y.is_ipv4() && x != y,
+        _ => false,
+    }
+}
+
+/// Второй источник внешнего IP. При split tunneling (часть трафика мимо VPN/прокси) разные сервисы
+/// видят разные адреса: российский nekoip.ru и «глобальный» ipify могут ответить по-разному.
+fn check_ip_alt(ip4: &str) {
+    let alt = get_ip(IP_ALT_URL, http(5));
+    if alt.is_empty() {
+        log(WARN, format!("Второй источник IP ({IP_ALT_NAME}) не ответил"));
+        return;
+    }
+    st().ip_alt = alt.clone();
+    if ip4.is_empty() {
+        // основной источник недоступен: используем второй
+        if alt.parse::<std::net::Ipv4Addr>().is_ok() {
+            let mut g = st();
+            g.ip4 = alt.clone();
+            g.summ.ip4 = alt.clone();
+        }
+        log(WARN, format!("IP по {IP_ALT_NAME}: {alt} (основной источник не ответил)"));
+        return;
+    }
+    if ip_differs(ip4, &alt) {
+        st().summ.ip_alt = format!("{alt} (ОТЛИЧАЕТСЯ от {ip4})");
+        log(WARN, format!("IP по {IP_ALT_NAME}: {alt} — ОТЛИЧАЕТСЯ от {ip4}"));
+        log(
+            WARN,
+            "Сервисы видят разные адреса: вероятно, включён VPN или прокси со split tunneling (часть трафика идёт мимо туннеля)",
+        );
+    } else {
+        st().summ.ip_alt = format!("{alt} (совпадает)");
+        log(OK, format!("IP по {IP_ALT_NAME}: {alt} (совпадает)"));
+    }
+}
+
 pub fn detect_ip() {
     log(HDR, "Внешний IP");
     let ip4 = get_ip("https://api.ipify.org", http(5));
@@ -195,6 +235,7 @@ pub fn detect_ip() {
             log(OK, format!("IPv6: {ip6}"));
         }
     }
+    check_ip_alt(&ip4);
     // IP через системный прокси
     let proxy = sys::system_proxy();
     if proxy.is_empty() {
@@ -771,6 +812,7 @@ pub fn log_summary() {
     p("Соединение", &s.conn);
     p("Линк", &s.link);
     p("IP", &s.ip4);
+    p(&format!("IP ({IP_ALT_NAME})"), &s.ip_alt);
     p("IP через прокси", &s.ip_proxy);
     p("DNS", &s.dns);
     p("Upstream-DNS", &s.dns_up);
@@ -839,13 +881,13 @@ pub fn run_all(list: Vec<String>) {
 }
 
 pub fn send_report(login: &str, note: &str) -> Result<(), String> {
-    let (body, ip4, ip6, ipp, link) = {
+    let (body, ip4, ip6, ipp, ipa, link) = {
         let g = st();
-        (g.report.clone(), g.ip4.clone(), g.ip6.clone(), g.ip_proxy.clone(), g.link.clone())
+        (g.report.clone(), g.ip4.clone(), g.ip6.clone(), g.ip_proxy.clone(), g.ip_alt.clone(), g.link.clone())
     };
     let payload = serde_json::json!({
         "isp": ISP_NAME, "login": login, "version": env!("CARGO_PKG_VERSION"),
-        "time": chrono::Local::now().to_rfc3339(), "ip4": ip4, "ip6": ip6, "ip_proxy": ipp,
+        "time": chrono::Local::now().to_rfc3339(), "ip4": ip4, "ip6": ip6, "ip_proxy": ipp, "ip_alt": ipa,
         "host": gethostname::gethostname().to_string_lossy(),
         "os": format!("{}/{}", std::env::consts::OS, std::env::consts::ARCH),
         "link": link, "note": note, "report": body,
@@ -924,5 +966,19 @@ mod load_tests {
         let stop = Arc::new(AtomicBool::new(false));
         let (_, sent) = load_probe(Ipv4Addr::LOCALHOST, false, None, stop).join().unwrap();
         assert_eq!(sent, 0);
+    }
+}
+
+#[cfg(test)]
+mod ip_tests {
+    use super::ip_differs;
+
+    #[test]
+    fn differs_only_within_same_family() {
+        assert!(ip_differs("1.2.3.4", "5.6.7.8"));
+        assert!(!ip_differs("1.2.3.4", "1.2.3.4"));
+        assert!(!ip_differs("1.2.3.4", "2001:db8::1")); // разные семейства не сравниваем
+        assert!(ip_differs("2001:db8::1", "2001:db8::2"));
+        assert!(!ip_differs("", "1.2.3.4"));
     }
 }

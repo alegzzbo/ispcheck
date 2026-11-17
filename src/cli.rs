@@ -164,7 +164,7 @@ pub fn run() -> ! {
             "time": chrono::Local::now().to_rfc3339(),
             "ok": bad_count() == 0,
             "summary": g.summ, "link": g.link,
-            "ip4": g.ip4, "ip6": g.ip6, "ip_proxy": g.ip_proxy,
+            "ip4": g.ip4, "ip6": g.ip6, "ip_proxy": g.ip_proxy, "ip_alt": g.ip_alt,
             "report": g.report,
         });
         println!("{}", serde_json::to_string_pretty(&j).unwrap_or_default());

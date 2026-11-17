@@ -37,3 +37,7 @@ pub const DOH_SERVERS: &[(&str, &str, &str)] = &[
     ("Google DoH", "https://dns.google/dns-query", "8.8.8.8"),
     ("Yandex DoH", "https://common.dot.dns.yandex.net/dns-query", "77.88.8.8"),
 ];
+
+// Второй источник внешнего IP: сравнение с ipify выявляет split tunneling (ответ — IP открытым текстом)
+pub const IP_ALT_URL: &str = "https://nekoip.ru/?format=txt";
+pub const IP_ALT_NAME: &str = "nekoip.ru";
