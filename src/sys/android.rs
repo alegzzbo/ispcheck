@@ -9,12 +9,23 @@ use std::time::{Duration, Instant};
 
 // ── JNI-мост ─────────────────────────────────────────────────
 
+static ACTIVITY: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Глобальная ссылка на MainActivity (ndk_context хранит Application, а не Activity).
+pub fn set_activity(p: *mut std::ffi::c_void) {
+    ACTIVITY.store(p as usize, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Вызов `String method([String])` у MainActivity.
 fn call_string(method: &str, arg: Option<&str>) -> Option<String> {
     let cx = ndk_context::android_context();
     let vm = unsafe { JavaVM::from_raw(cx.vm().cast()) }.ok()?;
     let mut env = vm.attach_current_thread().ok()?;
-    let act = unsafe { JObject::from_raw(cx.context().cast()) };
+    let raw = ACTIVITY.load(std::sync::atomic::Ordering::Relaxed);
+    if raw == 0 {
+        return None;
+    }
+    let act = unsafe { JObject::from_raw(raw as jni::sys::jobject) };
     let res = match arg {
         None => env.call_method(&act, method, "()Ljava/lang/String;", &[]),
         Some(a) => {

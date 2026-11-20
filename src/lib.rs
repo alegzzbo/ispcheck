@@ -40,6 +40,7 @@ pub fn run() {
 #[no_mangle]
 fn android_main(app: android_activity::AndroidApp) {
     let _ = rustls::crypto::ring::default_provider().install_default();
+    sys::set_activity(app.activity_as_ptr());
     if let Err(e) = gui::run_android(app) {
         eprintln!("{e}");
     }
