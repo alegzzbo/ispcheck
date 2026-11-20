@@ -12,7 +12,7 @@ import android.net.TrafficStats
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
-import androidx.games.activity.GameActivity
+import com.google.androidgamesdk.GameActivity
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.Inet4Address
