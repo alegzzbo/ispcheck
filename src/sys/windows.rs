@@ -101,6 +101,7 @@ struct Adapter {
     rx_bps: u64,
     tx_bps: u64,
     up: bool, // OperStatus == Up (кабель/сеть подключены)
+    if_index: u32,
 }
 
 /// Скорость линка в Мбит/с; Windows отдаёт u64::MAX (-1), если скорость неизвестна.
@@ -172,6 +173,7 @@ fn active_adapter() -> Option<Adapter> {
                         rx_bps: ad.ReceiveLinkSpeed,
                         tx_bps: ad.TransmitLinkSpeed,
                         up: ad.OperStatus == 1,
+                        if_index: ad.Anonymous1.Anonymous.IfIndex,
                     },
                     is_local,
                     has_gw,
@@ -390,4 +392,20 @@ pub fn link_info() -> Option<super::Link> {
         }
     }
     Some(l)
+}
+
+/// Счётчики байт активного интерфейса (принято, передано): для оценки фоновой нагрузки.
+pub fn if_counters() -> Option<(u64, u64)> {
+    let a = active_adapter()?;
+    if !a.up || a.if_index == 0 {
+        return None;
+    }
+    unsafe {
+        let mut row: MIB_IF_ROW2 = std::mem::zeroed();
+        row.InterfaceIndex = a.if_index;
+        if GetIfEntry2(&mut row) != 0 {
+            return None;
+        }
+        Some((row.InOctets, row.OutOctets))
+    }
 }

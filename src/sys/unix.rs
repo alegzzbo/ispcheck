@@ -459,11 +459,59 @@ pub fn link_info() -> Option<super::Link> {
     Some(l)
 }
 
+/// Строка /proc/net/dev -> (rx_bytes, tx_bytes) для интерфейса.
+fn parse_proc_net_dev(t: &str, iface: &str) -> Option<(u64, u64)> {
+    for l in t.lines() {
+        let Some((name, rest)) = l.split_once(':') else { continue };
+        if name.trim() != iface {
+            continue;
+        }
+        let f: Vec<&str> = rest.split_whitespace().collect();
+        return Some((f.get(0)?.parse().ok()?, f.get(8)?.parse().ok()?));
+    }
+    None
+}
+
+/// `netstat -ib -I <if>` (macOS): колонки Ibytes и Obytes по заголовку.
+fn parse_netstat_ib(t: &str) -> Option<(u64, u64)> {
+    let mut lines = t.lines();
+    let head: Vec<&str> = lines.next()?.split_whitespace().collect();
+    let (ib, ob) = (head.iter().position(|h| *h == "Ibytes")?, head.iter().position(|h| *h == "Obytes")?);
+    for l in lines {
+        let f: Vec<&str> = l.split_whitespace().collect();
+        if f.len() == head.len() && f.get(2).map_or(false, |n| n.starts_with("<Link")) {
+            return Some((f[ib].parse().ok()?, f[ob].parse().ok()?));
+        }
+    }
+    None
+}
+
+/// Счётчики байт интерфейса по умолчанию (принято, передано).
+pub fn if_counters() -> Option<(u64, u64)> {
+    let i = default_iface();
+    if i.is_empty() {
+        return None;
+    }
+    if let Ok(t) = std::fs::read_to_string("/proc/net/dev") {
+        return parse_proc_net_dev(&t, &i);
+    }
+    parse_netstat_ib(&cmd("netstat", &["-ib", "-I", &i]))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     /// Реальный вывод `/usr/sbin/iw dev wlan0 link` с MX Linux (ThinkPad, 5 ГГц)
+    #[test]
+    fn counters_parsers() {
+        let nd = "Inter-|   Receive                                                |  Transmit\n face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed\n    lo:  100 1 0 0 0 0 0 0  100 1 0 0 0 0 0 0\n wlan0: 1083803166 789055 0 0 0 0 0 0 1010667729 1408800 0 0 0 0 0 0\n";
+        assert_eq!(parse_proc_net_dev(nd, "wlan0"), Some((1083803166, 1010667729)));
+        assert_eq!(parse_proc_net_dev(nd, "eth0"), None);
+        let ns = "Name       Mtu   Network       Address            Ipkts Ierrs     Ibytes    Opkts Oerrs     Obytes  Coll\nen0   1500  <Link#6>    aa:bb:cc:dd:ee:ff  5000     0   7000000     4000     0   3000000     0\nen0   1500  192.168.1     192.168.1.5        5000     -   7000000     4000     -   3000000     -\n";
+        assert_eq!(parse_netstat_ib(ns), Some((7000000, 3000000)));
+    }
+
     #[test]
     fn mx_linux_real_output() {
         let o = "Connected to 32:07:5c:d4:53:2a (on wlan0)\n\tSSID: alegzznet_5G\n\tfreq: 5180.0\n\tRX: 1083803166 bytes (789055 packets)\n\tTX: 1010667729 bytes (1408800 packets)\n\tsignal: -44 dBm\n\trx bitrate: 260.0 MBit/s VHT-MCS 3 80MHz short GI VHT-NSS 2\n\ttx bitrate: 866.7 MBit/s VHT-MCS 9 80MHz short GI VHT-NSS 2\n\tbss flags: short-slot-time\n\tdtim period: 2\n\tbeacon int: 100\n";
