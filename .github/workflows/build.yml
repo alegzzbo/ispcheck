@@ -128,11 +128,74 @@ jobs:
             out/ispcheck-macos-universal.dmg.sha256
           if-no-files-found: error
 
+  android:
+    # Сбой этого задания не блокирует релиз Windows, Linux и macOS.
+    # Подпись: секреты ANDROID_KEYSTORE_B64 (base64 .jks), ANDROID_KS_PASS, ANDROID_KEY_ALIAS, ANDROID_KEY_PASS.
+    # Без них APK подписывается временным debug-ключом (обновление поверх прошлой версии не пройдёт).
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android-${{ env.PROFILE }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - run: cargo install cargo-ndk --locked
+
+      - name: Version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: V="${GITHUB_REF_NAME#v}" perl -0pi -e 's/^version = ".*?"/version = "$ENV{V}"/m' Cargo.toml
+
+      - name: Rust (.so)
+        run: bash android/build-rust.sh
+
+      - name: Keystore
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KS" ]; then
+            echo "$KS" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          fi
+
+      - name: APK
+        env:
+          ANDROID_KS_PASS: ${{ secrets.ANDROID_KS_PASS }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASS: ${{ secrets.ANDROID_KEY_PASS }}
+        run: |
+          VERSION="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
+          gradle -p android assembleRelease -PversionName="$VERSION" -PversionCode="$GITHUB_RUN_NUMBER"
+          cp android/app/build/outputs/apk/release/app-release.apk ispcheck-android.apk
+          sha256sum ispcheck-android.apk > ispcheck-android.apk.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ispcheck-android.apk
+          path: |
+            ispcheck-android.apk
+            ispcheck-android.apk.sha256
+          if-no-files-found: error
+
   release:
     # Релиз выходит, если прошли тесты и сборки Windows/Linux; dmg для macOS добавится, если он собрался.
     # Если macOS не собрался (нет раннера): Re-run failed jobs, затем Re-run job «release».
     if: startsWith(github.ref, 'refs/tags/v') && !cancelled() && needs.test.result == 'success' && needs.build.result == 'success'
-    needs: [test, build, macos]
+    needs: [test, build, macos, android]
     runs-on: ubuntu-latest
     permissions:
       contents: write

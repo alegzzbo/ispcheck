@@ -60,3 +60,15 @@ cargo build --release --no-default-features --features cli --target x86_64-unkno
 
 ## macOS: приложение и dmg
 Скрипт `packaging/macos/package.sh <бинарь> <версия> <папка>` (только на macOS) собирает `ISP Check.app` и `ispcheck-macos-universal.dmg`. Перед использованием замените `BUNDLE_ID` в начале скрипта. Иконка берётся из `favicon.ico` (желательно квадратный, 512 px и больше). В CI это делает задание `macos-universal`.
+
+## Android
+Нужны: JDK 17, Android SDK + NDK (`ANDROID_NDK_HOME`), Gradle 8.9+, `cargo install cargo-ndk`,
+`rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android`.
+```
+bash android/build-rust.sh                    # libispcheck.so -> android/app/src/main/jniLibs
+gradle -p android assembleRelease             # android/app/build/outputs/apk/release/app-release.apk
+```
+Подпись релиза: `ANDROID_KEYSTORE_FILE`, `ANDROID_KS_PASS`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASS` (иначе debug-ключ).
+В CI: секрет `ANDROID_KEYSTORE_B64` (base64 от .jks) и три остальных. Ключ храните постоянно: APK с другой подписью не обновится поверх.
+Иконка: добавьте `mipmap-*/ic_launcher.png` в `android/app/src/main/res` и замените `android:icon` в манифесте.
+Rust собирается как cdylib (`src/lib.rs`), десктопный бинарь `src/main.rs` вызывает `ispcheck::run()`.

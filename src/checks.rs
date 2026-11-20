@@ -14,7 +14,7 @@ const MS: Duration = Duration::from_millis(1);
 
 fn http(secs: u64) -> ClientBuilder {
     // no_proxy: прямое соединение, системный прокси проверяется отдельно
-    Client::builder().no_proxy().user_agent("Mozilla/5.0").timeout(Duration::from_secs(secs))
+    crate::net::tls(Client::builder()).no_proxy().user_agent("Mozilla/5.0").timeout(Duration::from_secs(secs))
 }
 
 fn ms(d: Duration) -> f64 {
@@ -79,6 +79,9 @@ fn check_link() {
     let weak = l.signal_pct.map_or(false, |p| p < 40) || l.signal_dbm.map_or(false, |d| d < -75);
     let slow_eth = l.kind == "ethernet" && l.rx_mbps > 0.0 && l.rx_mbps <= 100.0;
     log(if weak || slow_eth { WARN } else { OK }, format!("Линк: {s}"));
+    if l.kind == "wifi" && l.ssid.is_empty() && cfg!(target_os = "android") {
+        log("·", "SSID не показан: разрешите приложению доступ к геолокации и включите геолокацию в настройках телефона");
+    }
     if l.kind == "wifi" && l.ssid.is_empty() && cfg!(target_os = "macos") {
         log("·", "SSID не показан: macOS скрывает его от приложений без доступа к геолокации");
     }
@@ -97,6 +100,86 @@ fn check_link() {
     }
     if weak {
         log(WARN, "Слабый сигнал Wi-Fi: скорость и стабильность будут ниже");
+    }
+}
+
+/// Средняя скорость интерфейса за secs секунд: (приём, передача) в Мбит/с.
+fn sample_rates(secs: f64) -> Option<(f64, f64)> {
+    let a = sys::if_counters()?;
+    let t = Instant::now();
+    sleep(Duration::from_secs_f64(secs));
+    let b = sys::if_counters()?;
+    let dt = t.elapsed().as_secs_f64();
+    Some((
+        b.0.saturating_sub(a.0) as f64 * 8.0 / dt / 1e6,
+        b.1.saturating_sub(a.1) as f64 * 8.0 / dt / 1e6,
+    ))
+}
+
+fn bg_tip() -> &'static str {
+    if cfg!(windows) {
+        "Кто грузит сеть: Диспетчер задач -> вкладка «Процессы», столбец «Сеть», либо Монитор ресурсов (resmon) -> Сеть"
+    } else if cfg!(target_os = "android") {
+        "Кто грузит сеть: Настройки -> Сеть и интернет -> Передача данных (или Wi-Fi) -> трафик по приложениям"
+    } else if cfg!(target_os = "macos") {
+        "Кто грузит сеть: Мониторинг системы -> вкладка «Сеть»"
+    } else {
+        "Кто грузит сеть: sudo nethogs (или iftop)"
+    }
+}
+
+/// Порог: заметный фоновый трафик >= 2 Мбит/с, сильный >= 10 Мбит/с или 10% скорости линка.
+fn bg_level(rx: f64, tx: f64, link_mbps: f64) -> u8 {
+    let m = rx.max(tx);
+    if m >= 10.0 || (link_mbps > 0.0 && m >= 0.1 * link_mbps) {
+        2
+    } else if m >= 2.0 {
+        1
+    } else {
+        0
+    }
+}
+
+/// Перед проверками: не забивают ли канал другие программы на этом компьютере.
+/// Видны только данные этого компьютера (счётчики его сетевого интерфейса), а не других устройств в сети.
+pub fn check_background() {
+    log(HDR, "Фоновая нагрузка сети");
+    // порог от скорости линка: берём меньшее из положительных значений приёма и передачи
+    let link = st().link.as_ref().map_or(0.0, |l| match (l.rx_mbps > 0.0, l.tx_mbps > 0.0) {
+        (true, true) => l.rx_mbps.min(l.tx_mbps),
+        (true, false) => l.rx_mbps,
+        (false, true) => l.tx_mbps,
+        _ => 0.0,
+    });
+    let Some(mut r) = sample_rates(3.0) else {
+        log("·", "Счётчики сетевого интерфейса недоступны, фоновая нагрузка не измерена");
+        return;
+    };
+    let mut lvl = bg_level(r.0, r.1, link);
+    if lvl > 0 {
+        // короткий всплеск не считаем: перемеряем ещё раз через 5 с
+        sleep(Duration::from_secs(5));
+        if let Some(r2) = sample_rates(3.0) {
+            let l2 = bg_level(r2.0, r2.1, link);
+            if l2 <= lvl {
+                r = r2;
+                lvl = l2;
+            }
+        }
+    }
+    let txt = format!("приём {:.1}, передача {:.1} Мбит/с", r.0, r.1);
+    st().summ.bg.push(format!("перед проверкой: {txt}"));
+    match lvl {
+        0 => log(OK, format!("Канал свободен: {txt}")),
+        1 => {
+            log(WARN, format!("Есть фоновый трафик: {txt}. Он может исказить результаты"));
+            log("·", bg_tip());
+        }
+        _ => {
+            log(WARN, format!("Другие программы заметно загружают канал: {txt}. Скорость и задержка будут хуже реальных"));
+            log("·", "Закройте загрузки, торренты, облачную синхронизацию, обновления и видео, затем повторите проверку");
+            log("·", bg_tip());
+        }
     }
 }
 
@@ -155,7 +238,7 @@ pub fn internet_reachable() -> bool {
     let proxy = sys::system_proxy();
     !proxy.is_empty()
         && reqwest::Proxy::all(&proxy)
-            .map(|p| !get_ip("https://api.ipify.org", Client::builder().proxy(p).timeout(Duration::from_secs(5))).is_empty())
+            .map(|p| !get_ip("https://api.ipify.org", crate::net::tls(Client::builder()).proxy(p).timeout(Duration::from_secs(5))).is_empty())
             .unwrap_or(false)
 }
 
@@ -251,7 +334,7 @@ pub fn detect_ip() {
     }
     log(HDR, format!("Системный прокси: {proxy}"));
     let via = match reqwest::Proxy::all(&proxy) {
-        Ok(p) => get_ip("https://api.ipify.org", Client::builder().proxy(p).timeout(Duration::from_secs(8))),
+        Ok(p) => get_ip("https://api.ipify.org", crate::net::tls(Client::builder()).proxy(p).timeout(Duration::from_secs(8))),
         Err(_) => String::new(),
     };
     st().ip_proxy = via.clone();
@@ -498,8 +581,8 @@ impl Read for CountRead {
 }
 
 /// HTTP/1.1, по одному TCP на поток: HTTP/2 мультиплексировал бы все потоки в одно соединение.
-fn speed(down: bool) -> f64 {
-    let client = Client::builder()
+fn speed(down: bool) -> (f64, u64) {
+    let client = crate::net::tls(Client::builder())
         .no_proxy()
         .http1_only()
         .pool_max_idle_per_host(THREADS * 2)
@@ -508,7 +591,7 @@ fn speed(down: bool) -> f64 {
         .build();
     let Ok(client) = client else {
         log(BAD, "Не удалось создать HTTP-клиент для замера скорости");
-        return 0.0;
+        return (0.0, 0);
     };
     let end = Instant::now() + Duration::from_secs(SPEED_SECONDS);
     let total = Arc::new(AtomicU64::new(0));
@@ -557,8 +640,9 @@ fn speed(down: bool) -> f64 {
     sleep(Duration::from_secs(2));
     let (base, t0) = (total.load(Relaxed), Instant::now());
     sleep(end.saturating_duration_since(Instant::now()));
-    let bytes = total.load(Relaxed).saturating_sub(base);
-    bytes as f64 * 8.0 / t0.elapsed().as_secs_f64() / 1e6
+    let all = total.load(Relaxed);
+    let bytes = all.saturating_sub(base);
+    (bytes as f64 * 8.0 / t0.elapsed().as_secs_f64() / 1e6, all)
 }
 
 /// Фоновые пробы задержки, пока идёт замер скорости. Возвращает (RTT удачных проб, всего проб).
@@ -666,7 +750,11 @@ pub fn check_speed() {
         let stop = Arc::new(AtomicBool::new(false));
         let ht = load_probe(target, true, Some(443), stop.clone());
         let hg = gw.map(|g| load_probe(g, true, None, stop.clone()));
-        let v = speed(down);
+        let c0 = sys::if_counters();
+        let t_speed = Instant::now();
+        let (v, ours_bytes) = speed(down);
+        let c1 = sys::if_counters();
+        let dt_speed = t_speed.elapsed().as_secs_f64();
         stop.store(true, Relaxed);
         let (tt, ts) = ht.join().unwrap_or_default();
         let lg = hg.and_then(|h| h.join().ok()).and_then(|(t, s)| load_stat(&t, s));
@@ -682,6 +770,21 @@ pub fn check_speed() {
             let lim = if down { l.rx_mbps } else { l.tx_mbps };
             if lim > 0.0 && v > lim * 0.8 {
                 log(WARN, format!("Результат близок к скорости линка ({lim:.0} Мбит/с): замер упирается в линк, а не в провайдера"));
+            }
+        }
+        // Весь трафик интерфейса за время замера минус наш собственный (с запасом на заголовки):
+        // остаток принадлежит другим программам этого компьютера.
+        if let (Some(a), Some(b)) = (c0, c1) {
+            let iface = if down { b.0.saturating_sub(a.0) } else { b.1.saturating_sub(a.1) } as f64 * 8.0 / dt_speed / 1e6;
+            let ours = ours_bytes as f64 * 8.0 / dt_speed / 1e6;
+            let other = iface - ours * 1.08;
+            if other > 2.0f64.max(0.1 * ours) {
+                log(
+                    WARN,
+                    format!("Во время замера канал использовали и другие программы: около {other:.1} Мбит/с. Результат ({name}) занижен"),
+                );
+                log("·", bg_tip());
+                st().summ.bg.push(format!("{name}: другие программы около {other:.1} Мбит/с"));
             }
         }
         if v < 1.0 {
@@ -824,6 +927,9 @@ pub fn log_summary() {
     if s.down > 0.0 || s.up > 0.0 {
         log("·", format!("Скорость: загрузка {:.1}, отдача {:.1} Мбит/с", s.down, s.up));
     }
+    for v in &s.bg {
+        log("·", format!("Фоновая нагрузка {v}"));
+    }
     for v in &s.load {
         log("·", format!("Под нагрузкой {v}"));
     }
@@ -844,6 +950,7 @@ pub fn log_summary() {
 pub fn run_checks(list: Vec<String>) {
     log(HDR, format!("Тест {ISP_NAME} — {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S")));
     check_connection_info();
+    check_background();
     let gw_ok = check_gateway();
     let online = internet_reachable();
     if !online {
@@ -980,5 +1087,20 @@ mod ip_tests {
         assert!(!ip_differs("1.2.3.4", "2001:db8::1")); // разные семейства не сравниваем
         assert!(ip_differs("2001:db8::1", "2001:db8::2"));
         assert!(!ip_differs("", "1.2.3.4"));
+    }
+}
+
+#[cfg(test)]
+mod bg_tests {
+    use super::bg_level;
+
+    #[test]
+    fn levels() {
+        assert_eq!(bg_level(0.3, 0.1, 100.0), 0);
+        assert_eq!(bg_level(2.5, 0.1, 1000.0), 1);
+        assert_eq!(bg_level(12.0, 0.0, 1000.0), 2);
+        assert_eq!(bg_level(0.5, 0.0, 0.0), 0);
+        assert_eq!(bg_level(6.0, 0.0, 50.0), 2); // 6 Мбит/с = 12% линка 50 Мбит/с -> сильный
+        assert_eq!(bg_level(1.9, 1.9, 1000.0), 0);
     }
 }

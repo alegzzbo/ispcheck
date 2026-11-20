@@ -27,6 +27,7 @@ pub struct Summ {
     pub sites: Vec<String>,
     pub route: Vec<String>,
     pub load: Vec<String>, // задержка под нагрузкой
+    pub bg: Vec<String>,   // фоновый трафик других программ
 }
 
 #[derive(Default)]
@@ -126,12 +127,19 @@ fn echo_line(mark: &str, msg: &str) {
 
 /// Путь к файлу с сохранённым логином.
 pub fn login_path() -> std::path::PathBuf {
-    let base = if cfg!(windows) {
-        std::env::var_os("APPDATA").map(std::path::PathBuf::from)
-    } else {
-        std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config"))
-    };
-    base.unwrap_or_default().join("ispcheck").join("login.txt")
+    #[cfg(target_os = "android")]
+    {
+        std::path::PathBuf::from(crate::sys::files_dir()).join("login.txt")
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let base = if cfg!(windows) {
+            std::env::var_os("APPDATA").map(std::path::PathBuf::from)
+        } else {
+            std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config"))
+        };
+        base.unwrap_or_default().join("ispcheck").join("login.txt")
+    }
 }
 
 pub fn log(mark: &str, msg: impl Display) {

@@ -15,10 +15,14 @@ pub use windows::*;
 
 #[cfg(target_os = "macos")]
 mod macos;
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "android")))]
 mod unix;
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "android")))]
 pub use unix::*;
+#[cfg(target_os = "android")]
+mod android;
+#[cfg(target_os = "android")]
+pub use android::*;
 
 /// Данные о скорости линка активного адаптера (Ethernet / Wi-Fi).
 #[derive(Default, Clone, serde::Serialize)]
@@ -43,6 +47,7 @@ impl Link {
             "wifi" => "Wi-Fi",
             "ethernet" => "Ethernet",
             "vpn" => "VPN",
+            "cellular" => "Мобильная сеть",
             _ => "другое",
         }
     }

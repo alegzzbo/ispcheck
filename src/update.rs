@@ -54,7 +54,7 @@ pub fn newer(a: &str, b: &str) -> bool {
 }
 
 fn client(secs: u64) -> Result<reqwest::blocking::Client, String> {
-    reqwest::blocking::Client::builder()
+    crate::net::tls(reqwest::blocking::Client::builder())
         .timeout(Duration::from_secs(secs))
         .build()
         .map_err(|e| e.to_string())

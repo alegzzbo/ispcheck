@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.IspCheck" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">#11151C</item>
+        <item name="android:statusBarColor">#191F28</item>
+        <item name="android:navigationBarColor">#11151C</item>
+    </style>
+</resources>

@@ -9,6 +9,10 @@ use std::sync::{Arc, Mutex};
 /// Кнопка отправки показывается, только если задан REPORT_URL.
 const SEND_ENABLED: bool = !REPORT_URL.is_empty();
 
+#[cfg(target_os = "android")]
+mod mobile;
+
+#[cfg_attr(target_os = "android", allow(dead_code))]
 static PENDING: Mutex<Option<(update::UpdInfo, update::UpdFile)>> = Mutex::new(None);
 
 // ─── Цветовая палитра ───────────────────────────────────────────────
@@ -156,7 +160,7 @@ fn btn(ui: &mut egui::Ui, label: &str, kind: u8, enabled: bool) -> bool {
             }
             ui.add_enabled(
                 enabled,
-                egui::Button::new(egui::RichText::new(label).size(13.0).color(text_col)).min_size(egui::vec2(0.0, 30.0)),
+                egui::Button::new(egui::RichText::new(label).size(13.0).color(text_col)).min_size(egui::vec2(0.0, ui.spacing().interact_size.y.max(30.0))),
             )
         })
         .inner;
@@ -177,6 +181,16 @@ fn chip(ui: &mut egui::Ui, text: &str, color: Color32) {
         .show(ui, |ui| {
             ui.label(egui::RichText::new(text).size(12.0).color(color));
         });
+}
+
+fn copy_to_clipboard(ctx: &egui::Context, t: String) {
+    #[cfg(target_os = "android")]
+    {
+        let _ = ctx;
+        crate::sys::copy_text(&t);
+    }
+    #[cfg(not(target_os = "android"))]
+    ctx.copy_text(t);
 }
 
 // ─── App ─────────────────────────────────────────────────────────────
@@ -243,7 +257,9 @@ impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         set_ctx(cc.egui_ctx.clone());
         setup_fonts(&cc.egui_ctx);
+        #[cfg(not(target_os = "android"))]
         let ctx = cc.egui_ctx.clone();
+        #[cfg(not(target_os = "android"))]
         std::thread::spawn(move || {
             update::cleanup();
             std::thread::sleep(std::time::Duration::from_secs(2));
@@ -438,6 +454,9 @@ fn strip_marker<'a>(line: &'a str, marker: &str) -> Option<&'a str> {
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _: &mut eframe::Frame) {
+        #[cfg(target_os = "android")]
+        return self.ui_mobile(ui);
+        #[allow(unreachable_code)]
         let ctx = &ui.ctx().clone();
 
         if !self.themed {
@@ -602,7 +621,7 @@ impl eframe::App for App {
                     }
                     let just_copied = self.copied_at.map_or(false, |t| t.elapsed().as_millis() < 1500);
                     if btn(ui, if just_copied { "✓  Скопировано" } else { "Копировать отчёт" }, 0, true) {
-                        ctx.copy_text(text());
+                        copy_to_clipboard(ctx, text());
                         self.copied_at = Some(std::time::Instant::now());
                         ctx.request_repaint_after(std::time::Duration::from_millis(1600));
                     }
@@ -704,6 +723,12 @@ pub fn run() -> eframe::Result<()> {
         vp = vp.with_icon(ic);
     }
     let opts = eframe::NativeOptions { viewport: vp, ..Default::default() };
+    eframe::run_native("ispcheck", opts, Box::new(|cc| Ok(Box::new(App::new(cc)))))
+}
+
+#[cfg(target_os = "android")]
+pub fn run_android(app: android_activity::AndroidApp) -> eframe::Result<()> {
+    let opts = eframe::NativeOptions { android_app: Some(app), ..Default::default() };
     eframe::run_native("ispcheck", opts, Box::new(|cc| Ok(Box::new(App::new(cc)))))
 }
 
