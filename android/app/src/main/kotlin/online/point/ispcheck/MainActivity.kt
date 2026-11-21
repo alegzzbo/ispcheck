@@ -93,6 +93,16 @@ class MainActivity : GameActivity() {
                     c.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             }
 
+    /** Локальный адрес, который ядро выберет для исходящего трафика приложения (пакеты не отправляются). */
+    private fun routedAddress(): String? = try {
+        java.net.DatagramSocket().use { sock ->
+            sock.connect(java.net.InetAddress.getByName("8.8.8.8"), 53)
+            sock.localAddress?.hostAddress?.substringBefore('%')
+        }
+    } catch (_: Exception) {
+        null
+    }
+
     /**
      * Сеть, по которой реально идёт трафик: не VPN и с рабочим интернетом.
      * Wi-Fi без авторизации (captive portal) или без интернета не выбирается, пока есть другая рабочая сеть.
@@ -101,6 +111,17 @@ class MainActivity : GameActivity() {
         val active = cm.activeNetwork
         val rank = mapOf("ethernet" to 0, "wifi" to 1, "cellular" to 2)
         val cands = physical(cm)
+        // точнее всего: какой интерфейс ядро реально использует для маршрута в интернет
+        val local = routedAddress()
+        if (local != null) {
+            cands.firstOrNull { (n, _) ->
+                cm.getLinkProperties(n)?.linkAddresses?.any { it.address.hostAddress?.substringBefore('%') == local } == true
+            }?.let { return it.first }
+            // 464XLAT на мобильной сети: адрес 192.0.0.x не входит в список адресов сети
+            if (local.startsWith("192.0.0.")) {
+                cands.firstOrNull { transportOf(it.second) == "cellular" }?.let { return it.first }
+            }
+        }
         cands.firstOrNull { it.first == active && hasInternet(it.second) }?.let { return it.first }
         cands.filter { hasInternet(it.second) }.minByOrNull { rank[transportOf(it.second)] ?: 9 }?.let { return it.first }
         cands.firstOrNull { it.first == active }?.let { return it.first }
