@@ -13,6 +13,9 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
 import com.google.androidgamesdk.GameActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.Inet4Address
@@ -25,11 +28,27 @@ class MainActivity : GameActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // окно рисуется под системными панелями, отступы Rust берёт из ispInsets()
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = 0
+        window.navigationBarColor = 0
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = false
+            isAppearanceLightNavigationBars = false
+        }
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(
                 arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION), 1
             )
         }
+    }
+
+    /** left,top,right,bottom в пикселях: системные панели, вырез и клавиатура. */
+    fun ispInsets(): String {
+        val ins = ViewCompat.getRootWindowInsets(window.decorView) ?: return "0,0,0,0"
+        val b = ins.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+        val ime = ins.getInsets(WindowInsetsCompat.Type.ime())
+        return "${b.left},${b.top},${b.right},${maxOf(b.bottom, ime.bottom)}"
     }
 
     fun ispFilesDir(): String = filesDir.absolutePath

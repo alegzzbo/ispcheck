@@ -144,6 +144,11 @@ fn section_title(ui: &mut egui::Ui, title: &str) {
 
 /// Стилизованная кнопка (цвета по состоянию задаются стилем, без перерисовки поверх).
 fn btn(ui: &mut egui::Ui, label: &str, kind: u8, enabled: bool) -> bool {
+    btn_w(ui, label, kind, enabled, 0.0)
+}
+
+/// Кнопка с минимальной шириной (0 = по тексту); текст не переносится.
+fn btn_w(ui: &mut egui::Ui, label: &str, kind: u8, enabled: bool, width: f32) -> bool {
     let (fill, hover_fill) = match kind {
         1 => (palette::BTN_PRIMARY, palette::BTN_PRIMARY_HOVER),
         2 => (palette::BTN_DANGER, palette::BTN_DANGER_HOVER),
@@ -160,7 +165,7 @@ fn btn(ui: &mut egui::Ui, label: &str, kind: u8, enabled: bool) -> bool {
             }
             ui.add_enabled(
                 enabled,
-                egui::Button::new(egui::RichText::new(label).size(13.0).color(text_col)).min_size(egui::vec2(0.0, ui.spacing().interact_size.y.max(30.0))),
+                egui::Button::new(egui::RichText::new(label).size(13.0).color(text_col)).truncate().min_size(egui::vec2(width, ui.spacing().interact_size.y.max(30.0))),
             )
         })
         .inner;

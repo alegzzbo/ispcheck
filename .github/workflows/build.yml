@@ -160,6 +160,10 @@ jobs:
         shell: bash
         run: V="${GITHUB_REF_NAME#v}" perl -0pi -e 's/^version = ".*?"/version = "$ENV{V}"/m' Cargo.toml
 
+      - name: Icons from favicon.ico
+        run: |
+          if [ -f favicon.ico ]; then pip install pillow && python3 android/make-icons.py favicon.ico; fi
+
       - name: Rust (.so)
         run: bash android/build-rust.sh
 

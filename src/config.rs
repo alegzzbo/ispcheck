@@ -39,5 +39,5 @@ pub const DOH_SERVERS: &[(&str, &str, &str)] = &[
 ];
 
 // Второй источник внешнего IP: сравнение с ipify выявляет split tunneling (ответ — IP открытым текстом)
-pub const IP_ALT_URL: &str = "https://nekoip.ru/?format=txt";
-pub const IP_ALT_NAME: &str = "nekoip.ru";
+pub const IP_ALT_URL: &str = "https://internet-lab.ru/ip";
+pub const IP_ALT_NAME: &str = "internet-lab.ru";

@@ -265,11 +265,14 @@ fn ip_differs(a: &str, b: &str) -> bool {
 }
 
 /// Второй источник внешнего IP. При split tunneling (часть трафика мимо VPN/прокси) разные сервисы
-/// видят разные адреса: российский nekoip.ru и «глобальный» ipify могут ответить по-разному.
+/// видят разные адреса: российский internet-lab.ru и «глобальный» ipify могут ответить по-разному.
 fn check_ip_alt(ip4: &str) {
     let alt = get_ip(IP_ALT_URL, http(5));
     if alt.is_empty() {
-        log(WARN, format!("Второй источник IP ({IP_ALT_NAME}) не ответил"));
+        // резервный источник: предупреждаем, только если внешний IP не определён вовсе
+        if ip4.is_empty() {
+            log(WARN, "Внешний IP определить не удалось (оба источника не ответили)");
+        }
         return;
     }
     st().ip_alt = alt.clone();
@@ -517,7 +520,12 @@ fn check_doh() -> bool {
         }
         let n = DNS_DOMAINS.len();
         if good == 0 {
-            log(BAD, format!("{name}: нет ответа ({last_err})"));
+            let short = if last_err.starts_with("error sending request") || last_err.contains("http") {
+                "таймаут / ошибка соединения".to_string()
+            } else {
+                last_err.clone()
+            };
+            log(BAD, format!("{name}: нет ответа ({short})"));
         } else {
             log(if good < n { WARN } else { OK }, format!("{name}: {good}/{n}, ср. {:.0} мс", total / good as f64));
             any = true;

@@ -82,6 +82,26 @@ fn snap() -> Snap {
     s
 }
 
+static INSETS: Mutex<Option<(Instant, [f32; 4])>> = Mutex::new(None);
+
+/// Отступы окна в пикселях: (left, top, right, bottom).
+pub fn insets() -> [f32; 4] {
+    let mut g = INSETS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((t, v)) = g.as_ref() {
+        if t.elapsed() < Duration::from_millis(250) {
+            return *v;
+        }
+    }
+    let mut v = [0f32; 4];
+    if let Some(s) = call_string("ispInsets", None) {
+        for (i, x) in s.split(',').take(4).enumerate() {
+            v[i] = x.trim().parse().unwrap_or(0.0);
+        }
+    }
+    *g = Some((Instant::now(), v));
+    v
+}
+
 /// Каталог данных приложения (для login.txt).
 pub fn files_dir() -> String {
     call_string("ispFilesDir", None).unwrap_or_default()
