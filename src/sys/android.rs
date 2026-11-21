@@ -62,6 +62,8 @@ struct Snap {
     rx: f64,
     tx: f64,
     phy: String,
+    validated: bool,
+    wifi_no_inet: bool,
     down_kbps: f64,
     up_kbps: f64,
 }
@@ -157,13 +159,20 @@ pub fn default_gateway() -> Result<Ipv4Addr, String> {
 pub fn connection_type() -> String {
     let s = snap();
     let i = &s.iface;
-    match s.transport.as_str() {
+    let base = match s.transport.as_str() {
         "wifi" => format!("Wi-Fi ({i})"),
         "ethernet" => format!("Ethernet, кабель ({i})"),
         "cellular" => format!("Мобильная сеть ({i})"),
         "vpn" => format!("VPN ({i})"),
         "none" | "" => "нет подключения".into(),
         _ => format!("неизвестно ({i})"),
+    };
+    if s.transport == "wifi" && !s.validated {
+        format!("{base}, но интернета нет (нет авторизации в сети или проблема у провайдера)")
+    } else if s.transport != "wifi" && s.wifi_no_inet {
+        format!("{base}; Wi-Fi подключён, но без интернета (вход в портал не выполнен), трафик идёт через мобильную сеть")
+    } else {
+        base
     }
 }
 

@@ -12,6 +12,7 @@ import android.net.TrafficStats
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
+import android.view.KeyEvent
 import com.google.androidgamesdk.GameActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -44,6 +45,15 @@ class MainActivity : GameActivity() {
     }
 
     /** left,top,right,bottom в пикселях: системные панели, вырез и клавиатура. */
+    /** GameActivity отдаёт «Назад» в нативный код, где его никто не обрабатывает: сворачиваем приложение. */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+            if (event.action == KeyEvent.ACTION_UP && !event.isCanceled) moveTaskToBack(true)
+            return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
     fun ispInsets(): String {
         val ins = ViewCompat.getRootWindowInsets(window.decorView) ?: return "0,0,0,0"
         val b = ins.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
@@ -71,20 +81,30 @@ class MainActivity : GameActivity() {
         else -> "other"
     }
 
-    /** Физическая сеть, а не VPN: диагностика линка и шлюза нужна для канала до провайдера. */
-    private fun pickNetwork(cm: ConnectivityManager): Network? {
-        val active = cm.activeNetwork
-        val ac = active?.let { cm.getNetworkCapabilities(it) }
-        if (active != null && ac != null && !ac.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) return active
-        val rank = mapOf("ethernet" to 0, "wifi" to 1, "cellular" to 2)
-        return cm.allNetworks
+    private fun hasInternet(c: NetworkCapabilities) =
+        c.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) &&
+            !c.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL)
+
+    private fun physical(cm: ConnectivityManager): List<Pair<Network, NetworkCapabilities>> =
+        cm.allNetworks
             .mapNotNull { n -> cm.getNetworkCapabilities(n)?.let { n to it } }
             .filter { (_, c) ->
                 !c.hasTransport(NetworkCapabilities.TRANSPORT_VPN) &&
                     c.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             }
-            .minByOrNull { (_, c) -> rank[transportOf(c)] ?: 9 }
-            ?.first ?: active
+
+    /**
+     * Сеть, по которой реально идёт трафик: не VPN и с рабочим интернетом.
+     * Wi-Fi без авторизации (captive portal) или без интернета не выбирается, пока есть другая рабочая сеть.
+     */
+    private fun pickNetwork(cm: ConnectivityManager): Network? {
+        val active = cm.activeNetwork
+        val rank = mapOf("ethernet" to 0, "wifi" to 1, "cellular" to 2)
+        val cands = physical(cm)
+        cands.firstOrNull { it.first == active && hasInternet(it.second) }?.let { return it.first }
+        cands.filter { hasInternet(it.second) }.minByOrNull { rank[transportOf(it.second)] ?: 9 }?.let { return it.first }
+        cands.firstOrNull { it.first == active }?.let { return it.first }
+        return cands.minByOrNull { rank[transportOf(it.second)] ?: 9 }?.first ?: active
     }
 
     fun ispSnapshot(): String {
@@ -97,6 +117,8 @@ class MainActivity : GameActivity() {
             val transport = if (caps == null) "none" else transportOf(caps)
             o.put("transport", transport)
             o.put("iface", lp?.interfaceName ?: "")
+            o.put("validated", caps != null && hasInternet(caps))
+            o.put("wifi_no_inet", physical(cm).any { transportOf(it.second) == "wifi" && !hasInternet(it.second) })
             if (caps != null) {
                 o.put("down_kbps", caps.linkDownstreamBandwidthKbps)
                 o.put("up_kbps", caps.linkUpstreamBandwidthKbps)
