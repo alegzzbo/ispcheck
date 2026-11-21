@@ -256,6 +256,10 @@ struct App {
     updating: Arc<AtomicBool>,
     themed: bool,
     copied_at: Option<std::time::Instant>,
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    tab: u8,
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    swipe_from: Option<egui::Pos2>,
 }
 
 impl App {
@@ -288,6 +292,8 @@ impl App {
             can_send: Default::default(),
             updating: Default::default(),
             copied_at: None,
+            tab: 0,
+            swipe_from: None,
             themed: false,
         }
     }
