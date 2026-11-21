@@ -102,6 +102,39 @@ pub fn insets() -> [f32; 4] {
     v
 }
 
+// ── экранная клавиатура ──────────────────────────────────────
+// winit 0.30 не передаёт текст из GameActivity, поэтому читаем TextInputState напрямую.
+
+static APP: std::sync::OnceLock<android_activity::AndroidApp> = std::sync::OnceLock::new();
+
+pub fn set_app(a: android_activity::AndroidApp) {
+    let _ = APP.set(a);
+}
+
+/// Фокус в текстовом поле: передать IME текущий текст и показать клавиатуру.
+pub fn ime_focus(text: &str) {
+    use android_activity::input::{TextInputState, TextSpan};
+    if let Some(a) = APP.get() {
+        a.set_text_input_state(TextInputState {
+            text: text.to_string(),
+            selection: TextSpan { start: text.len(), end: text.len() },
+            compose_region: None,
+        });
+        a.show_soft_input(true);
+    }
+}
+
+pub fn ime_blur() {
+    if let Some(a) = APP.get() {
+        a.hide_soft_input(false);
+    }
+}
+
+/// Текст, каким его видит IME сейчас.
+pub fn ime_read() -> Option<String> {
+    APP.get().map(|a| a.text_input_state().text)
+}
+
 /// Каталог данных приложения (для login.txt).
 pub fn files_dir() -> String {
     call_string("ispFilesDir", None).unwrap_or_default()

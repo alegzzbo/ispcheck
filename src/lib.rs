@@ -41,6 +41,7 @@ pub fn run() {
 fn android_main(app: android_activity::AndroidApp) {
     let _ = rustls::crypto::ring::default_provider().install_default();
     sys::set_activity(app.activity_as_ptr());
+    sys::set_app(app.clone());
     if let Err(e) = gui::run_android(app) {
         eprintln!("{e}");
     }

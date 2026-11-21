@@ -1,6 +1,14 @@
 //! Раскладка для телефона: шапка, две вкладки («Параметры» без прокрутки и «Результат»).
 use super::*;
 
+fn save_login(login: &str) {
+    let p = login_path();
+    if let Some(d) = p.parent() {
+        let _ = std::fs::create_dir_all(d);
+    }
+    let _ = std::fs::write(p, login.trim());
+}
+
 const FOOTER_H: f32 = 56.0;
 
 impl App {
@@ -67,12 +75,14 @@ impl App {
             });
             ui.add_space(4.0);
 
+            self.ime_now = None;
             if self.tab == 0 {
                 self.tab_params(ui, &ctx, busy, mtr_on);
             } else {
                 self.tab_result(ui, &ctx, busy, mtr_on, sending, working);
             }
         });
+        self.sync_ime(&ctx);
 
         // свайп влево/вправо переключает вкладки
         let (pressed, released, pos) =
@@ -87,6 +97,43 @@ impl App {
                     self.tab = if dx < 0.0 { 1 } else { 0 };
                 }
             }
+        }
+    }
+
+    fn field_mut(&mut self, i: u8) -> &mut String {
+        match i {
+            0 => &mut self.login,
+            1 => &mut self.extra,
+            2 => &mut self.note,
+            3 => &mut self.mtr_host,
+            _ => &mut self.mtr_cycles,
+        }
+    }
+
+    /// Экранная клавиатура: фокус поля -> показать IME; текст из IME -> в поле.
+    fn sync_ime(&mut self, ctx: &egui::Context) {
+        let now = self.ime_now.take();
+        if now != self.ime_field {
+            self.ime_field = now;
+            match now {
+                Some(i) => {
+                    let t = self.field_mut(i).clone();
+                    crate::sys::ime_focus(&t);
+                }
+                None => crate::sys::ime_blur(),
+            }
+        } else if let Some(i) = now {
+            if let Some(t) = crate::sys::ime_read() {
+                if *self.field_mut(i) != t {
+                    *self.field_mut(i) = t.clone();
+                    if i == 0 {
+                        save_login(&t);
+                    }
+                }
+            }
+        }
+        if now.is_some() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(80));
         }
     }
 
@@ -153,27 +200,32 @@ impl App {
                         .hint_text("Ваш логин в системе провайдера")
                         .desired_width(f32::INFINITY),
                 );
+                if r.has_focus() {
+                    self.ime_now = Some(0);
+                }
                 if r.changed() {
-                    let p = login_path();
-                    if let Some(d) = p.parent() {
-                        let _ = std::fs::create_dir_all(d);
-                    }
-                    let _ = std::fs::write(p, self.login.trim());
+                    save_login(&self.login);
                 }
                 section_title(ui, "Сайты, которые не открываются");
-                ui.add(
+                let r = ui.add(
                     egui::TextEdit::multiline(&mut self.extra)
                         .hint_text("По одному в строке: example.com")
                         .desired_rows(2)
                         .desired_width(f32::INFINITY),
                 );
+                if r.has_focus() {
+                    self.ime_now = Some(1);
+                }
                 section_title(ui, "Комментарий");
-                ui.add(
+                let r = ui.add(
                     egui::TextEdit::multiline(&mut self.note)
                         .hint_text("Опишите проблему (необязательно)")
                         .desired_rows(1)
                         .desired_width(f32::INFINITY),
                 );
+                if r.has_focus() {
+                    self.ime_now = Some(2);
+                }
             });
             ui.add_space(6.0);
 
@@ -198,12 +250,19 @@ impl App {
                     ui.vertical(|ui| {
                         ui.set_width(wh);
                         section_title(ui, "MTR: узел / IP");
-                        ui.add(egui::TextEdit::singleline(&mut self.mtr_host).desired_width(wh));
+                        if ui.add(egui::TextEdit::singleline(&mut self.mtr_host).desired_width(wh)).has_focus() {
+                            self.ime_now = Some(3);
+                        }
                     });
                     ui.vertical(|ui| {
                         ui.set_width(wc);
                         section_title(ui, "Циклы");
-                        ui.add(egui::TextEdit::singleline(&mut self.mtr_cycles).hint_text("0 = ∞").desired_width(wc));
+                        if ui
+                            .add(egui::TextEdit::singleline(&mut self.mtr_cycles).hint_text("0 = ∞").desired_width(wc))
+                            .has_focus()
+                        {
+                            self.ime_now = Some(4);
+                        }
                     });
                 });
                 let w = ui.available_width();

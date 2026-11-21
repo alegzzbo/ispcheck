@@ -259,6 +259,10 @@ struct App {
     #[cfg_attr(not(target_os = "android"), allow(dead_code))]
     tab: u8,
     #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    ime_now: Option<u8>,
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    ime_field: Option<u8>,
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
     swipe_from: Option<egui::Pos2>,
 }
 
@@ -293,6 +297,8 @@ impl App {
             updating: Default::default(),
             copied_at: None,
             tab: 0,
+            ime_now: None,
+            ime_field: None,
             swipe_from: None,
             themed: false,
         }
