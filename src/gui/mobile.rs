@@ -9,6 +9,14 @@ fn save_login(login: &str) {
     let _ = std::fs::write(p, login.trim());
 }
 
+/// Ставит курсор egui в поле (текст менялся снаружи, курсор остался бы в начале).
+fn set_cursor(ctx: &egui::Context, i: u8, pos: usize) {
+    let id = egui::Id::new(("ime", i));
+    let mut st = egui::TextEdit::load_state(ctx, id).unwrap_or_default();
+    st.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(pos))));
+    st.store(ctx, id);
+}
+
 const FOOTER_H: f32 = 56.0;
 
 impl App {
@@ -119,16 +127,18 @@ impl App {
                 Some(i) => {
                     let t = self.field_mut(i).clone();
                     crate::sys::ime_focus(&t);
+                    set_cursor(ctx, i, t.chars().count());
                 }
                 None => crate::sys::ime_blur(),
             }
         } else if let Some(i) = now {
-            if let Some(t) = crate::sys::ime_read() {
+            if let Some((t, cur)) = crate::sys::ime_read() {
                 if *self.field_mut(i) != t {
                     *self.field_mut(i) = t.clone();
                     if i == 0 {
                         save_login(&t);
                     }
+                    set_cursor(ctx, i, cur);
                 }
             }
         }
@@ -196,7 +206,7 @@ impl App {
                 ui.set_width(ui.available_width());
                 section_title(ui, "Логин");
                 let r = ui.add(
-                    egui::TextEdit::singleline(&mut self.login)
+                    egui::TextEdit::singleline(&mut self.login).id(egui::Id::new(("ime", 0u8)))
                         .hint_text("Ваш логин в системе провайдера")
                         .desired_width(f32::INFINITY),
                 );
@@ -208,7 +218,7 @@ impl App {
                 }
                 section_title(ui, "Сайты, которые не открываются");
                 let r = ui.add(
-                    egui::TextEdit::multiline(&mut self.extra)
+                    egui::TextEdit::multiline(&mut self.extra).id(egui::Id::new(("ime", 1u8)))
                         .hint_text("По одному в строке: example.com")
                         .desired_rows(2)
                         .desired_width(f32::INFINITY),
@@ -218,7 +228,7 @@ impl App {
                 }
                 section_title(ui, "Комментарий");
                 let r = ui.add(
-                    egui::TextEdit::multiline(&mut self.note)
+                    egui::TextEdit::multiline(&mut self.note).id(egui::Id::new(("ime", 2u8)))
                         .hint_text("Опишите проблему (необязательно)")
                         .desired_rows(1)
                         .desired_width(f32::INFINITY),
@@ -250,7 +260,7 @@ impl App {
                     ui.vertical(|ui| {
                         ui.set_width(wh);
                         section_title(ui, "MTR: узел / IP");
-                        if ui.add(egui::TextEdit::singleline(&mut self.mtr_host).desired_width(wh)).has_focus() {
+                        if ui.add(egui::TextEdit::singleline(&mut self.mtr_host).id(egui::Id::new(("ime", 3u8))).desired_width(wh)).has_focus() {
                             self.ime_now = Some(3);
                         }
                     });
@@ -258,7 +268,7 @@ impl App {
                         ui.set_width(wc);
                         section_title(ui, "Циклы");
                         if ui
-                            .add(egui::TextEdit::singleline(&mut self.mtr_cycles).hint_text("0 = ∞").desired_width(wc))
+                            .add(egui::TextEdit::singleline(&mut self.mtr_cycles).id(egui::Id::new(("ime", 4u8))).hint_text("0 = ∞").desired_width(wc))
                             .has_focus()
                         {
                             self.ime_now = Some(4);

@@ -130,9 +130,12 @@ pub fn ime_blur() {
     }
 }
 
-/// Текст, каким его видит IME сейчас.
-pub fn ime_read() -> Option<String> {
-    APP.get().map(|a| a.text_input_state().text)
+/// Текст IME и позиция курсора (в символах).
+pub fn ime_read() -> Option<(String, usize)> {
+    let st = APP.get()?.text_input_state();
+    let end = st.selection.end.min(st.text.len());
+    let cur = st.text.get(..end).map_or(st.text.chars().count(), |p| p.chars().count());
+    Some((st.text, cur))
 }
 
 /// Каталог данных приложения (для login.txt).
