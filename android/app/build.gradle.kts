@@ -3,8 +3,9 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-// Подпись релиза: ключ из переменных окружения (секреты CI) или постоянный android/ispcheck.jks из репозитория.
-// Ключ должен быть один и тот же во всех сборках, иначе APK не обновится поверх установленного.
+// Подпись релиза: ключ только из секретов CI / переменных окружения, в репозитории ключей нет.
+// ANDROID_KEYSTORE_FILE (путь к .jks), ANDROID_KS_PASS, ANDROID_KEY_ALIAS, ANDROID_KEY_PASS.
+// Без них (локальная сборка) APK подписывается debug-ключом.
 fun env(n: String) = System.getenv(n)?.takeIf { it.isNotEmpty() }
 val ksFile = env("ANDROID_KEYSTORE_FILE")
 
@@ -23,18 +24,20 @@ android {
     }
 
     signingConfigs {
-        create("release") {
-            storeFile = if (ksFile != null) file(ksFile) else rootProject.file("ispcheck.jks")
-            storePassword = env("ANDROID_KS_PASS") ?: "ispcheck"
-            keyAlias = env("ANDROID_KEY_ALIAS") ?: "ispcheck"
-            keyPassword = env("ANDROID_KEY_PASS") ?: "ispcheck"
+        if (ksFile != null) {
+            create("release") {
+                storeFile = file(ksFile)
+                storePassword = env("ANDROID_KS_PASS")
+                keyAlias = env("ANDROID_KEY_ALIAS")
+                keyPassword = env("ANDROID_KEY_PASS")
+            }
         }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false // MainActivity.isp* вызываются из Rust по имени
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
 

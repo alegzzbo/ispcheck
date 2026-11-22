@@ -132,6 +132,7 @@ jobs:
     # Сбой этого задания не блокирует релиз Windows, Linux и macOS.
     # Подпись: секреты ANDROID_KEYSTORE_B64 (base64 .jks), ANDROID_KS_PASS, ANDROID_KEY_ALIAS, ANDROID_KEY_PASS.
     # Без них APK подписывается временным debug-ключом (обновление поверх прошлой версии не пройдёт).
+    # Ключ в репозитории не хранится.
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
