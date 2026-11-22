@@ -62,6 +62,7 @@ struct Snap {
     rx: f64,
     tx: f64,
     phy: String,
+    dbg: String,
     validated: bool,
     wifi_no_inet: bool,
     down_kbps: f64,
@@ -174,6 +175,11 @@ pub fn connection_type() -> String {
     } else {
         base
     }
+}
+
+/// Строка диагностики: какие сети видит Android и какая выбрана.
+pub fn net_debug() -> String {
+    snap().dbg
 }
 
 pub fn system_dns() -> Vec<String> {

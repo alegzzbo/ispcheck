@@ -110,22 +110,41 @@ class MainActivity : GameActivity() {
     private fun pickNetwork(cm: ConnectivityManager): Network? {
         val active = cm.activeNetwork
         val rank = mapOf("ethernet" to 0, "wifi" to 1, "cellular" to 2)
+        fun r(c: NetworkCapabilities) = rank[transportOf(c)] ?: 9
         val cands = physical(cm)
-        // точнее всего: какой интерфейс ядро реально использует для маршрута в интернет
+        val good = cands.filter { hasInternet(it.second) }
+        // 1) рабочая сеть: активная, иначе лучшая по приоритету
+        good.firstOrNull { it.first == active }?.let { return it.first }
+        good.minByOrNull { r(it.second) }?.let { return it.first }
+        // 2) рабочего интернета нет нигде: Wi-Fi без авторизации (captive portal) уступает мобильной сети
+        val nonWifi = cands.filter { transportOf(it.second) != "wifi" }
+        if (nonWifi.isNotEmpty() && cands.any { transportOf(it.second) == "wifi" }) {
+            nonWifi.minByOrNull { r(it.second) }?.let { return it.first }
+        }
+        // 3) по адресу, который ядро выберет для маршрута
         val local = routedAddress()
         if (local != null) {
             cands.firstOrNull { (n, _) ->
                 cm.getLinkProperties(n)?.linkAddresses?.any { it.address.hostAddress?.substringBefore('%') == local } == true
             }?.let { return it.first }
-            // 464XLAT на мобильной сети: адрес 192.0.0.x не входит в список адресов сети
-            if (local.startsWith("192.0.0.")) {
-                cands.firstOrNull { transportOf(it.second) == "cellular" }?.let { return it.first }
-            }
         }
-        cands.firstOrNull { it.first == active && hasInternet(it.second) }?.let { return it.first }
-        cands.filter { hasInternet(it.second) }.minByOrNull { rank[transportOf(it.second)] ?: 9 }?.let { return it.first }
         cands.firstOrNull { it.first == active }?.let { return it.first }
-        return cands.minByOrNull { rank[transportOf(it.second)] ?: 9 }?.first ?: active
+        return cands.minByOrNull { r(it.second) }?.first ?: active
+    }
+
+    /** Состояние сетей для строки диагностики в отчёте. */
+    private fun netDebug(cm: ConnectivityManager): String = try {
+        val active = cm.activeNetwork
+        val items = physical(cm).joinToString("; ") { (n, c) ->
+            val lp = cm.getLinkProperties(n)
+            "${transportOf(c)}:${lp?.interfaceName ?: "?"}" +
+                (if (n == active) " активная" else "") +
+                (if (c.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) " проверена" else " не проверена") +
+                (if (c.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL)) " портал" else "")
+        }
+        "Сети Android: $items; маршрут через ${routedAddress() ?: "?"}"
+    } catch (_: Exception) {
+        ""
     }
 
     fun ispSnapshot(): String {
@@ -138,6 +157,7 @@ class MainActivity : GameActivity() {
             val transport = if (caps == null) "none" else transportOf(caps)
             o.put("transport", transport)
             o.put("iface", lp?.interfaceName ?: "")
+            o.put("dbg", netDebug(cm))
             o.put("validated", caps != null && hasInternet(caps))
             o.put("wifi_no_inet", physical(cm).any { transportOf(it.second) == "wifi" && !hasInternet(it.second) })
             if (caps != null) {

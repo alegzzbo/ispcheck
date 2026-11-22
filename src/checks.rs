@@ -51,6 +51,13 @@ pub fn check_connection_info() {
     let c = sys::connection_type();
     st().summ.conn = c.clone();
     log(OK, format!("Соединение: {c}"));
+    #[cfg(target_os = "android")]
+    {
+        let d = sys::net_debug();
+        if !d.is_empty() {
+            log("·", d);
+        }
+    }
     check_link();
 }
 
@@ -188,6 +195,12 @@ pub fn check_gateway() -> bool {
     let gw = match sys::default_gateway() {
         Ok(g) => g,
         Err(e) => {
+            // мобильная сеть: у неё нет шлюза в локальной сети, это не ошибка
+            if st().link.as_ref().map_or(false, |l| l.kind == "cellular") {
+                st().summ.gw = "нет (мобильная сеть)".into();
+                log("·", "Мобильная сеть: шлюза в локальной сети нет, проверка пропущена");
+                return true;
+            }
             st().summ.gw = "не определён".into();
             log(BAD, format!("не определён: {e}"));
             return false;
@@ -208,7 +221,7 @@ pub fn check_gateway() -> bool {
     }
     if ts.is_empty() {
         st().summ.gw = format!("{gw}: не отвечает на ICMP");
-        log(WARN, format!("{gw}: не отвечает на ICMP (возможно, фильтруется роутером)"));
+        log(WARN, format!("{gw}: не отвечает на ICMP (возможно, фильтруется роутером). Шлюз в анализе задержки под нагрузкой использоваться не будет"));
         return true;
     }
     let (avg, jit) = avg_jitter(&ts);
@@ -754,6 +767,8 @@ pub fn check_speed() {
         }
         let idle_t = idle_ms(target, Some(443));
         let idle_g = gw.and_then(|g| idle_ms(g, None));
+        // шлюз, который не отвечает, в анализе не участвует: по нему нечего сравнивать
+        let gw = gw.filter(|_| idle_g.is_some());
         // пробы задержки до замера и во время него: до внешнего адреса и до шлюза
         let stop = Arc::new(AtomicBool::new(false));
         let ht = load_probe(target, true, Some(443), stop.clone());
@@ -810,7 +825,9 @@ pub fn check_speed() {
             let d = idle_t.map_or(String::new(), |i| format!("{:+.0} мс", s.avg - i));
             st().summ.load.push(format!("{name}: до 1.1.1.1 {d}, макс {:.0} мс, потери {:.0}%", s.max, s.loss));
         }
-        if bad_t && bad_g {
+        if bad_t && gw.is_none() {
+            log(WARN, "Задержка под нагрузкой растёт до 1.1.1.1. Шлюз недоступен для замера (нет ответа на ICMP или мобильная сеть), поэтому где именно растёт очередь, определить нельзя");
+        } else if bad_t && bad_g {
             log(WARN, "Задержка растёт и до шлюза: вероятно, перегружены Wi-Fi или роутер (слабый CPU, очередь на LAN-стороне)");
         } else if bad_t {
             log(WARN, "Задержка растёт только за шлюзом: вероятно, раздувание очередей (bufferbloat) на роутере (WAN-сторона) или у провайдера");
